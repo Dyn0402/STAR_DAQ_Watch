@@ -5,7 +5,7 @@ Created on March 16 2:12 AM 2022
 Created in PyCharm
 Created as Misc/daq_watch
 
-Dependencies: Selenium 4.1.3, simpleaudio 1.0.4, pydub 0.25.1, time, datetime
+Dependencies: Selenium 4.1.3, simpleaudio 1.0.4, pydub 0.25.1, time, datetime, sys.platform
 
 Script to monitor STAR online DAQ Monitor webpage using selenium package. In an infinite loop, page is refreshed and
 each detector dead time is read out. If any is close above some threshold value (~90%) the detector is considered dead.
@@ -16,12 +16,15 @@ until no detectors are found to be dead.
 @author: Dylan Neff, Dyn04
 """
 
+from sys import platform
+from time import sleep
+from datetime import datetime as dt
+
 import selenium.common.exceptions
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from time import sleep
-from datetime import datetime as dt
+
 from pydub import AudioSegment
 from pydub.playback import play, _play_with_simpleaudio
 
@@ -40,7 +43,16 @@ def main():
     notify = AudioSegment.from_file('notify.wav') * repeat_num
     failure = AudioSegment.from_file('chord.wav') * 20
     run_stop_text = 'Got the run stop request for run'
-    chrome_driver_path = 'chromedriver_win.exe'
+
+    if 'linux' in platform:
+        chrome_driver_path = 'chromedriver_linux'
+    elif platform == 'darwin':
+        chrome_driver_path = 'chromedriver_mac'
+    elif 'win' in platform:
+        chrome_driver_path = 'chromedriver_win.exe'
+    else:
+        print('Unknown OS, don\'t know which selenium chrome driver to use. Exiting.')
+        return
 
     ser = Service(chrome_driver_path)
     op = webdriver.ChromeOptions()
