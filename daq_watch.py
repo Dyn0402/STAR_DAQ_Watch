@@ -19,7 +19,7 @@ until no detectors are found to be dead.
 
 from sys import platform
 from time import sleep
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 
 import selenium.common.exceptions
 from selenium.common.exceptions import WebDriverException
@@ -49,6 +49,7 @@ def main():
     failure = AudioSegment.from_file('chord.wav') * 20
     run_finished = AudioSegment.from_file('Alarm04.wav')
     run_stop_text = 'Got the run stop request for run'
+    run_start_text = 'Starting run #'
     trig2_all_name = 'ALL'
 
     firefox_driver_path = ''
@@ -91,10 +92,12 @@ def main():
         while True:
             click_button(driver, xpaths['frames']['refresh'], xpaths['buttons']['refresh'], click_pause=0.3)
             duration = read_field(driver, xpaths['frames']['header'], xpaths['info']['duration'])
-            recent_run_stop = check_run_end(driver, xpaths['frames']['footer'], xpaths['info'], run_stop_text,
-                                            run_end_window, run_stop_messages)
+            # recent_run_stop = check_run_end(driver, xpaths['frames']['footer'], xpaths['info'], run_stop_text,
+            #                                 run_end_window, run_stop_messages)
+            between_runs = check_between_runs(driver, xpaths['frames']['footer'], xpaths['info'], run_stop_text,
+                                              run_start_text, run_stop_messages)
             if check_duration(duration, min_run_time, run_duration_min, run_duration_max, run_finished) \
-                    and not recent_run_stop:
+                    and not between_runs:
                 print(f'\n{dt.now()} | Running. Check dead times')
                 try:
                     daq_hz = check_daq_hz(driver, xpaths['frames']['main'], xpaths['info'], trig2_all_name)
@@ -106,7 +109,7 @@ def main():
                     dead = int(dead.strip('%'))
                     if dead > dead_thresh:
                         if dead_det_times[det] == 0 and dead_chime:
-                            play(chimes)
+                            _play_with_simpleaudio(chimes)
                         dead_det_times[det] = (dt.now() - live_det_stamps[det]).total_seconds()
                     else:
                         dead_det_times[det] = 0
@@ -132,8 +135,11 @@ def main():
                 if not any_dead:
                     print(f'All detectors alive')
             else:
-                if recent_run_stop:
-                    wait_reason = f'Run stopped less than {run_end_window}s ago'
+                # if recent_run_stop:
+                #     wait_reason = f'Run stopped less than {run_end_window}s ago'
+                if between_runs:
+                    wait_reason = f'Run stopped'
+                    live_det_stamps = {x: dt.now() for x in xpaths['detectors']}  # Reset dead time counters
                 else:
                     wait_reason = f'Not running for at least {min_run_time}s yet'
                 print(f'{dt.now()} | {wait_reason}, waiting...')
@@ -302,8 +308,9 @@ def check_duration(duration, min_s, run_min, run_max, run_finished):
         duration = duration[0] * 24 * 60 * 60 + duration[1] * 60 * 60 + duration[2] * 60 + duration[3]  # Convert to s
 
         if run_min < duration < run_max:
-            print(f'Run more than {run_min / 60} minutes long.')
-            play(run_finished)
+            # print(f'Run more than {run_min / 60} minutes long.')
+            print(f'Run duration {timedelta(seconds=duration)}, maybe time to start a new one?')
+            _play_with_simpleaudio(run_finished)
 
         if duration > min_s:
             return True
@@ -338,14 +345,15 @@ def check_run_end(driver, xframe, xinfos, run_stop_text, run_end_window, num_mes
     return False
 
 
-def check_between_runs(driver, xframe, xinfos, run_stop_text, run_start_text, run_end_window, num_messages=5):
+def check_between_runs(driver, xframe, xinfos, run_stop_text, run_start_text, num_messages=100):
     """
-    Check to see if the run has ended recently
+    Check to see if run start or run end message more recent. If run start, must be running so return False.
+    If run end, must be between runs so return True. If neither found assume running (?)
     :param driver: Chrome driver to webpage
     :param xframe: xpath for frame of the daq messages
     :param xinfos: Dictionary of info which includes xpaths for DAQ messages
     :param run_stop_text: String indicating a run stop message on the DAQ
-    :param run_end_window: Window in which to consider run recently stopped (seconds)
+    :param run_start_text: String indicating a new run has started on the DAQ
     :param num_messages: Number of messages in the DAQ to check for run stop message
     :return: True if run stopped recently, False if not
     """
@@ -354,14 +362,10 @@ def check_between_runs(driver, xframe, xinfos, run_stop_text, run_start_text, ru
     for message_num in range(num_messages):
         row_index = xinfos['message_first_index'] + message_num
         message = driver.find_element(By.XPATH, xinfos['messages'](row_index, xinfos['message_text_col'])).text
+        if message[:len(run_start_text)] == run_start_text:  # Currently running
+            return False
         if message[:len(run_stop_text)] == run_stop_text:
-            stop_time = driver.find_element(By.XPATH, xinfos['messages'](row_index, xinfos['message_time_col'])).text
-            stop_time = dt.combine(dt.now().date(), dt.strptime(stop_time, '%H:%M:%S').time())
-            stopped_seconds = (dt.now() - stop_time).total_seconds()
-            while stopped_seconds < 0:
-                stopped_seconds += 24 * 60 * 60  # Correct for wrongly assuming message time is today. Get nearest day.
-            if stopped_seconds < run_end_window:
-                return True
+            return True
     return False
 
 
