@@ -6,6 +6,7 @@ Created in PyCharm
 Created as Misc/daq_watch
 
 Dependencies: Selenium 4.1.3, simpleaudio 1.0.4, pydub 0.25.1, time, datetime, sys.platform
+libasound2-dev on linux
 
 Script to monitor STAR online DAQ Monitor webpage using selenium package. In an infinite loop, page is refreshed and
 each detector dead time is read out. If any is close above some threshold value (~90%) the detector is considered dead.
@@ -18,9 +19,10 @@ until no detectors are found to be dead.
 
 from sys import platform
 from time import sleep
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 
 import selenium.common.exceptions
+from selenium.common.exceptions import WebDriverException
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -32,8 +34,10 @@ from pydub.playback import play, _play_with_simpleaudio
 def main():
     min_run_time = 60  # s If run not this old, don't check dead time yet
     run_stop_messages = 10  # Number of messages to check from most recent for a run stop
-    run_end_window = 60  # s Consider run stopped if message no more than this old
+    daq_hz_thresh = 1  # Hz If ALL DAQ Hz less than this, sound alarm (beam loss)
     dead_chime = True  # If True play chime immediately after any detector goes dead, else just alarm for extended dead
+    run_duration_min = 30 * 60  # s How long run should go for.
+    run_duration_max = run_duration_min + 20  # s When to stop notifying that run is too long.
 
     refresh_sleep = 1  # s How long to sleep at end of loop before refreshing page and checking again
     dead_thresh = 90  # % Dead time above which to consider detector dead
@@ -42,21 +46,37 @@ def main():
     chimes = AudioSegment.from_file('chimes.wav')
     notify = AudioSegment.from_file('notify.wav') * repeat_num
     failure = AudioSegment.from_file('chord.wav') * 20
+    run_finished = AudioSegment.from_file('Alarm04.wav')
     run_stop_text = 'Got the run stop request for run'
+    run_start_text = 'Starting run #'
+    trig2_all_name = 'ALL'
 
+    firefox_driver_path = ''
     if 'linux' in platform:
-        chrome_driver_path = 'chromedriver_linux'
+        chrome_driver_path = './chromedriver_linux'
     elif platform == 'darwin':
-        chrome_driver_path = 'chromedriver_mac'
+        chrome_driver_path = './chromedriver_mac'
     elif 'win' in platform:
-        chrome_driver_path = 'chromedriver_win.exe'
+        chrome_driver_path = './chromedriver_win.exe'
+        firefox_driver_path = './geckodriver_win.exe'
     else:
         print('Unknown OS, don\'t know which selenium chrome driver to use. Exiting.')
         return
 
-    ser = Service(chrome_driver_path)
-    op = webdriver.ChromeOptions()
-    driver = webdriver.Chrome(service=ser, options=op)
+    try:
+        ser = Service(chrome_driver_path)
+        op = webdriver.ChromeOptions()
+        op.add_argument('headless')
+        driver = webdriver.Chrome(service=ser, options=op)
+    except WebDriverException:
+        print(f'Couldn\'t find Chrome binaries (probably), try firefox.')
+        try:
+            ser = Service(firefox_driver_path)
+            op = webdriver.FirefoxOptions()
+            op.headless = True
+            driver = webdriver.Firefox(service=ser, options=op)
+        except WebDriverException as e:
+            print(f'Chrome and firefox both failed, giving up.\n{e}')
     driver.get('https://online.star.bnl.gov/daq/export/daq/')
     sleep(3)  # Give some time for page to load
 
@@ -71,11 +91,13 @@ def main():
         while True:
             click_button(driver, xpaths['frames']['refresh'], xpaths['buttons']['refresh'], click_pause=0.3)
             duration = read_field(driver, xpaths['frames']['header'], xpaths['info']['duration'])
-            recent_run_stop = check_run_end(driver, xpaths['frames']['footer'], xpaths['info'], run_stop_text,
-                                            run_end_window, run_stop_messages)
-            if check_duration(duration, min_run_time) and not recent_run_stop:
+            between_runs = check_between_runs(driver, xpaths['frames']['footer'], xpaths['info'], run_stop_text,
+                                              run_start_text, run_stop_messages)
+            if check_duration(duration, min_run_time, run_duration_min, run_duration_max, run_finished) \
+                    and not between_runs:
                 print(f'\n{dt.now()} | Running. Check dead times')
                 try:
+                    daq_hz = check_daq_hz(driver, xpaths['frames']['main'], xpaths['info'], trig2_all_name)
                     dets_read = read_dets(driver, xpaths['frames']['main'], xpaths['detectors'])
                 except selenium.common.exceptions.StaleElementReferenceException:
                     print('Something stale in detectors?')
@@ -84,7 +106,7 @@ def main():
                     dead = int(dead.strip('%'))
                     if dead > dead_thresh:
                         if dead_det_times[det] == 0 and dead_chime:
-                            play(chimes)
+                            _play_with_simpleaudio(chimes)
                         dead_det_times[det] = (dt.now() - live_det_stamps[det]).total_seconds()
                     else:
                         dead_det_times[det] = 0
@@ -99,14 +121,20 @@ def main():
                         if alarm_playback is None or not alarm_playback.is_playing():
                             alarm_playback = _play_with_simpleaudio(notify)
                         alarm = True
+                if daq_hz < daq_hz_thresh and not any_dead:
+                    print(f'DAQ Hz less than {daq_hz_thresh}Hz but all detectors alive!')
+                    if alarm_playback is None or not alarm_playback.is_playing():
+                        alarm_playback = _play_with_simpleaudio(notify)
+                    alarm = True
+                elif not any_dead:
+                    print(f'All detectors alive')
                 if not alarm:
                     if alarm_playback is not None and alarm_playback.is_playing():
                         alarm_playback.stop()
-                if not any_dead:
-                    print(f'All detectors alive')
             else:
-                if recent_run_stop:
-                    wait_reason = f'Run stopped less than {run_end_window}s ago'
+                if between_runs:
+                    wait_reason = f'Run stopped'
+                    live_det_stamps = {x: dt.now() for x in xpaths['detectors']}  # Reset dead time counters
                 else:
                     wait_reason = f'Not running for at least {min_run_time}s yet'
                 print(f'{dt.now()} | {wait_reason}, waiting...')
@@ -172,6 +200,8 @@ def set_xpaths():
                 'message_text_col': 7,
                 'message_first_index': 2,
                 'messages': lambda row, col: f'//*[@id="tb"]/tbody/tr[{row}]/td[{col}]',
+                'trig2_name': lambda row: f'//*[@id="trg2"]/tbody/tr[{row}]/td[1]',
+                'trig2_hz': lambda row: f'//*[@id="trg2"]/tbody/tr[{row}]/td[3]',
             },
         'detectors':
             {
@@ -256,11 +286,14 @@ def read_dets(driver, xframe, xdets):
     return dets_read
 
 
-def check_duration(duration, min_s):
+def check_duration(duration, min_s, run_min, run_max, run_finished):
     """
     Check if run duration field is in running state and longer than min_s seconds
     :param duration: Duration string from DAQ Monitor field
-    :param min_s: Minimum number of seconds running. Return false if running time less than this
+    :param min_s: s Minimum number of seconds running. Return false if running time less than this
+    :param run_min: s If duration larger than this and less than run_max, notify that run is finished.
+    :param run_max: s If duration less than this and greater than run_min, notify that run is finished.
+    :param run_finished: Audio to play if run finished.
     :return: True if running for longer than min_s, else False
     """
 
@@ -268,13 +301,21 @@ def check_duration(duration, min_s):
     if len(duration) == 4:
         duration = [int(x.strip().strip(y)) for x, y in zip(duration, [' days', ' hr', ' min', ' s'])]
         duration = duration[0] * 24 * 60 * 60 + duration[1] * 60 * 60 + duration[2] * 60 + duration[3]  # Convert to s
+
+        if run_min < duration < run_max:
+            # print(f'Run more than {run_min / 60} minutes long.')
+            print(f'Run duration {timedelta(seconds=duration)}, maybe time to start a new one?')
+            _play_with_simpleaudio(run_finished)
+
         if duration > min_s:
             return True
+
     return False
 
 
 def check_run_end(driver, xframe, xinfos, run_stop_text, run_end_window, num_messages=5):
     """
+    DEPRECATED!
     Check to see if the run has ended recently
     :param driver: Chrome driver to webpage
     :param xframe: xpath for frame of the daq messages
@@ -298,6 +339,43 @@ def check_run_end(driver, xframe, xinfos, run_stop_text, run_end_window, num_mes
             if stopped_seconds < run_end_window:
                 return True
     return False
+
+
+def check_between_runs(driver, xframe, xinfos, run_stop_text, run_start_text, num_messages=100):
+    """
+    Check to see if run start or run end message more recent. If run start, must be running so return False.
+    If run end, must be between runs so return True. If neither found assume running (?)
+    :param driver: Chrome driver to webpage
+    :param xframe: xpath for frame of the daq messages
+    :param xinfos: Dictionary of info which includes xpaths for DAQ messages
+    :param run_stop_text: String indicating a run stop message on the DAQ
+    :param run_start_text: String indicating a new run has started on the DAQ
+    :param num_messages: Number of messages in the DAQ to check for run stop message
+    :return: True if run stopped recently, False if not
+    """
+
+    switch_frame(driver, xframe)
+    for message_num in range(num_messages):
+        row_index = xinfos['message_first_index'] + message_num
+        message = driver.find_element(By.XPATH, xinfos['messages'](row_index, xinfos['message_text_col'])).text
+        if message[:len(run_start_text)] == run_start_text:  # Currently running
+            return False
+        if message[:len(run_stop_text)] == run_stop_text:
+            return True
+    return False
+
+
+def check_daq_hz(driver, xframe, xinfos, trig2_all_name):
+    switch_frame(driver, xframe)
+    trig2_name = ''
+    row = 1  # Row starts at 2 on page
+    while trig2_name != trig2_all_name:
+        row += 1
+        # Need try catch here for if row is too large!
+        trig2_name = driver.find_element(By.XPATH, xinfos['trig2_name'](row)).text
+    daq_hz = int(driver.find_element(By.XPATH, xinfos['trig2_hz'](row)).text)
+
+    return daq_hz
 
 
 if __name__ == '__main__':
