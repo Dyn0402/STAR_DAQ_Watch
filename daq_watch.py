@@ -34,7 +34,6 @@ from pydub.playback import play, _play_with_simpleaudio
 def main():
     min_run_time = 60  # s If run not this old, don't check dead time yet
     run_stop_messages = 10  # Number of messages to check from most recent for a run stop
-    run_end_window = 60  # s Consider run stopped if message no more than this old
     daq_hz_thresh = 1  # Hz If ALL DAQ Hz less than this, sound alarm (beam loss)
     dead_chime = True  # If True play chime immediately after any detector goes dead, else just alarm for extended dead
     run_duration_min = 30 * 60  # s How long run should go for.
@@ -92,8 +91,6 @@ def main():
         while True:
             click_button(driver, xpaths['frames']['refresh'], xpaths['buttons']['refresh'], click_pause=0.3)
             duration = read_field(driver, xpaths['frames']['header'], xpaths['info']['duration'])
-            # recent_run_stop = check_run_end(driver, xpaths['frames']['footer'], xpaths['info'], run_stop_text,
-            #                                 run_end_window, run_stop_messages)
             between_runs = check_between_runs(driver, xpaths['frames']['footer'], xpaths['info'], run_stop_text,
                                               run_start_text, run_stop_messages)
             if check_duration(duration, min_run_time, run_duration_min, run_duration_max, run_finished) \
@@ -124,19 +121,17 @@ def main():
                         if alarm_playback is None or not alarm_playback.is_playing():
                             alarm_playback = _play_with_simpleaudio(notify)
                         alarm = True
-                if daq_hz < daq_hz_thresh:
-                    print(f'DAQ Hz less than {daq_hz_thresh}Hz!')
+                if daq_hz < daq_hz_thresh and not any_dead:
+                    print(f'DAQ Hz less than {daq_hz_thresh}Hz but all detectors alive!')
                     if alarm_playback is None or not alarm_playback.is_playing():
                         alarm_playback = _play_with_simpleaudio(notify)
                     alarm = True
+                elif not any_dead:
+                    print(f'All detectors alive')
                 if not alarm:
                     if alarm_playback is not None and alarm_playback.is_playing():
                         alarm_playback.stop()
-                if not any_dead:
-                    print(f'All detectors alive')
             else:
-                # if recent_run_stop:
-                #     wait_reason = f'Run stopped less than {run_end_window}s ago'
                 if between_runs:
                     wait_reason = f'Run stopped'
                     live_det_stamps = {x: dt.now() for x in xpaths['detectors']}  # Reset dead time counters
@@ -320,6 +315,7 @@ def check_duration(duration, min_s, run_min, run_max, run_finished):
 
 def check_run_end(driver, xframe, xinfos, run_stop_text, run_end_window, num_messages=5):
     """
+    DEPRECATED!
     Check to see if the run has ended recently
     :param driver: Chrome driver to webpage
     :param xframe: xpath for frame of the daq messages
