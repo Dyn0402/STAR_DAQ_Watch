@@ -103,10 +103,11 @@ class DaqWatcher:
         self.driver.get('https://online.star.bnl.gov/daq/export/daq/')
         sleep(3)  # Give some time for page to load
 
-        click_button(self.driver, self.xpaths['frames']['refresh'], self.xpaths['buttons']['refresh'], 8)
+        click_button(self.driver, self.xpaths['frames']['left'], self.xpaths['buttons']['refresh'], 8)
         self.keep_checking_daq = True
-        # self.check_daq_async()  # Let GUI deal with threads
-        self.check_daq()  # Run check_daq recursively until check_daq goes to false
+        self.live_det_stamps = {x: dt.now() for x in self.xpaths['detectors']}
+        self.dead_det_times = {x: 0 for x in self.xpaths['detectors']}
+        self.check_daq()  # Check daq until keep_checking goes to false
 
     def is_alive(self):
         return self.driver is not None
@@ -120,7 +121,7 @@ class DaqWatcher:
         driver = self.driver  # Handoff
         self.driver = None  # Set immediately so is_alive is false
         # sleep(self.refresh_sleep + 3)
-        if self.driver is not None:
+        if driver is not None:
             self.print_status('Stopping, wait for confirmation...')
             driver.close()  # Close open driver on own time.
             self.print_status('Stopped.')
@@ -139,34 +140,23 @@ class DaqWatcher:
         self.silent = False
         self.print_status('Unsilenced')
 
-    # def check_daq_async(self):
-    #     t2 = Thread(target=self.check_daq)
-    #     t2.start()
-
     def check_daq(self):
-        if self.keep_checking_daq:
+        while self.keep_checking_daq:
             try:
-                click_button(self.driver, self.xpaths['frames']['refresh'], self.xpaths['buttons']['refresh'],
+                click_button(self.driver, self.xpaths['frames']['left'], self.xpaths['buttons']['refresh'],
                              click_pause=0.3)
                 duration = read_field(self.driver, self.xpaths['frames']['header'], self.xpaths['info']['duration'])
-                # recent_run_stop = check_run_end(self.driver, self.xpaths['frames']['footer'], self.xpaths['info'],
-                #                                 self.run_stop_text, self.run_end_window, self.run_stop_messages)
-                # between_runs = check_between_runs(self.driver, self.xpaths['frames']['footer'], self.xpaths['info'],
-                #                                   self.run_stop_text, self.run_start_text, self.run_stop_messages)
-                running = check_running(self.driver, self.xpaths['frames']['left'], self.xpaths['info']['run_state'],
-                                        self.running_state_text)
-                if check_duration(duration, self.min_run_time, self.run_duration_min, self.run_duration_max,
-                                  self.run_finished, self.silent) and running:
+                running = self.check_running()
+                if self.check_duration(duration) and running:
                     self.print_status(f'\n{dt.now()} | Running. Check dead times')
                     try:
-                        daq_hz = check_daq_hz(self.driver, self.xpaths['frames']['main'], self.xpaths['info'],
-                                              self.trig2_all_name)
+                        daq_hz = self.check_daq_hz()
                         dets_read = read_dets(self.driver, self.xpaths['frames']['main'], self.xpaths['detectors'])
                     except selenium.common.exceptions.StaleElementReferenceException:
                         self.print_status('Something stale in detectors?')
                         # self.check_daq_async()  # Recursion to rerun check_daq asynchronously
-                        self.check_daq()  # Will recursion without finishing function cause memory leak?
-                        return
+                        # self.check_daq()  # Will recursion without finishing function cause memory leak? -> Yes
+                        continue
                     for det, dead in zip(self.xpaths['detectors'].keys(), dets_read):
                         dead = int(dead.strip('%'))
                         if dead > self.dead_thresh:
@@ -209,13 +199,57 @@ class DaqWatcher:
             except Exception as e:
                 self.print_status(f'Error reading Daq Monitor!\n{e}')
             # self.check_daq_async()  # Recursion to rerun check_daq asynchronously  # Let GUI handle threads
-            self.check_daq()  # Recursively check_daq until keep_checking is false
+            # self.check_daq()  # Recursively check_daq until keep_checking is false -> Memory leak
 
     def print_status(self, status):
         if self.gui is not None:
             self.gui.print_status(status)
         else:
             print(status)
+
+    def check_duration(self, duration):
+        """
+        Check if run duration field is in running state and longer than min_s seconds
+        :param duration: Duration string from DAQ Monitor field
+        :return: True if running for longer than min_s, else False
+        """
+
+        duration = duration.split(',')
+        if len(duration) == 4:
+            duration = [int(x.strip().strip(y)) for x, y in zip(duration, [' days', ' hr', ' min', ' s'])]
+            duration = duration[0] * 24 * 60 * 60 + duration[1] * 60 * 60 + duration[2] * 60 + duration[
+                3]  # Convert to s
+
+            if self.run_duration_min < duration < self.run_duration_max:
+                self.print_status(f'Run duration {timedelta(seconds=duration)}, maybe time to start a new one?')
+                if not self.silent:
+                    _play_with_simpleaudio(self.run_finished)
+
+            if duration > self.min_run_time:
+                return True
+
+        return False
+
+    def check_running(self):
+        """
+        Check if run state is running
+        :return: True if running, else false
+        """
+        switch_frame(self.driver, self.xpaths['frames']['left'])
+        run_state = self.driver.find_element(By.XPATH, self.xpaths['info']['run_state']).text
+        return run_state == self.running_state_text
+
+    def check_daq_hz(self):
+        switch_frame(self.driver, self.xpaths['frames']['main'])
+        trig2_name = ''
+        row = 1  # Row starts at 2 on page
+        while trig2_name != self.trig2_all_name:
+            row += 1
+            # Need try catch here for if row is too large!
+            trig2_name = self.driver.find_element(By.XPATH, self.xpaths['info']['trig2_name'](row)).text
+        daq_hz = int(self.driver.find_element(By.XPATH, self.xpaths['info']['trig2_hz'](row)).text)
+
+        return daq_hz
 
 
 def set_alarm_times():
@@ -255,7 +289,7 @@ def set_xpaths():
     xpaths = {
         'frames':
             {
-                'refresh': '//*[@id="left"]',
+                'left': '//*[@id="left"]',
                 'main': '//*[@id="main"]',
                 'header': '//*[@id="header"]',
                 'footer': '//*[@id="footer"]',
@@ -354,116 +388,6 @@ def read_dets(driver, xframe, xdets):
     for det, xdet in xdets.items():
         dets_read.append(driver.find_element(By.XPATH, xdet).text)
     return dets_read
-
-
-def check_duration(duration, min_s, run_min, run_max, run_finished, silent):
-    """
-    Check if run duration field is in running state and longer than min_s seconds
-    :param duration: Duration string from DAQ Monitor field
-    :param min_s: s Minimum number of seconds running. Return false if running time less than this
-    :param run_min: s If duration larger than this and less than run_max, notify that run is finished.
-    :param run_max: s If duration less than this and greater than run_min, notify that run is finished.
-    :param run_finished: Audio to play if run finished.
-    :param silent: Only play sound if False
-    :return: True if running for longer than min_s, else False
-    """
-
-    duration = duration.split(',')
-    if len(duration) == 4:
-        duration = [int(x.strip().strip(y)) for x, y in zip(duration, [' days', ' hr', ' min', ' s'])]
-        duration = duration[0] * 24 * 60 * 60 + duration[1] * 60 * 60 + duration[2] * 60 + duration[
-            3]  # Convert to s
-
-        if run_min < duration < run_max:
-            # print(f'Run more than {run_min / 60} minutes long.')
-            print(f'Run duration {timedelta(seconds=duration)}, maybe time to start a new one?')
-            if not silent:
-                _play_with_simpleaudio(run_finished)
-
-        if duration > min_s:
-            return True
-
-    return False
-
-
-def check_run_end(driver, xframe, xinfos, run_stop_text, run_end_window, num_messages=5):
-    """
-    DEPRECATED!
-    Check to see if the run has ended recently
-    :param driver: Chrome driver to webpage
-    :param xframe: xpath for frame of the daq messages
-    :param xinfos: Dictionary of info which includes xpaths for DAQ messages
-    :param run_stop_text: String indicating a run stop message on the DAQ
-    :param run_end_window: Window in which to consider run recently stopped (seconds)
-    :param num_messages: Number of messages in the DAQ to check for run stop message
-    :return: True if run stopped recently, False if not
-    """
-
-    switch_frame(driver, xframe)
-    for message_num in range(num_messages):
-        row_index = xinfos['message_first_index'] + message_num
-        message = driver.find_element(By.XPATH, xinfos['messages'](row_index, xinfos['message_text_col'])).text
-        if message[:len(run_stop_text)] == run_stop_text:
-            stop_time = driver.find_element(By.XPATH, xinfos['messages'](row_index, xinfos['message_time_col'])).text
-            stop_time = dt.combine(dt.now().date(), dt.strptime(stop_time, '%H:%M:%S').time())
-            stopped_seconds = (dt.now() - stop_time).total_seconds()
-            while stopped_seconds < 0:
-                stopped_seconds += 24 * 60 * 60  # Correct for wrongly assuming message time is today. Get nearest day.
-            if stopped_seconds < run_end_window:
-                return True
-    return False
-
-
-def check_between_runs(driver, xframe, xinfos, run_stop_text, run_start_text, num_messages=100):
-    """
-    Check to see if run start or run end message more recent. If run start, must be running so return False.
-    If run end, must be between runs so return True. If neither found assume running (?)
-    :param driver: Chrome driver to webpage
-    :param xframe: xpath for frame of the daq messages
-    :param xinfos: Dictionary of info which includes xpaths for DAQ messages
-    :param run_stop_text: String indicating a run stop message on the DAQ
-    :param run_start_text: String indicating a new run has started on the DAQ
-    :param num_messages: Number of messages in the DAQ to check for run stop message
-    :return: True if run stopped recently, False if not
-    """
-
-    switch_frame(driver, xframe)
-    for message_num in range(num_messages):
-        row_index = xinfos['message_first_index'] + message_num
-        message = driver.find_element(By.XPATH, xinfos['messages'](row_index, xinfos['message_text_col'])).text
-        if message[:len(run_start_text)] == run_start_text:  # Currently running
-            return False
-        if message[:len(run_stop_text)] == run_stop_text:
-            return True
-    return False
-
-
-def check_daq_hz(driver, xframe, xinfos, trig2_all_name):
-    switch_frame(driver, xframe)
-    trig2_name = ''
-    row = 1  # Row starts at 2 on page
-    while trig2_name != trig2_all_name:
-        row += 1
-        # Need try catch here for if row is too large!
-        trig2_name = driver.find_element(By.XPATH, xinfos['trig2_name'](row)).text
-    daq_hz = int(driver.find_element(By.XPATH, xinfos['trig2_hz'](row)).text)
-
-    return daq_hz
-
-
-def check_running(driver, xframe, xrun_state, running_state_text):
-    """
-    Check if run state is running
-    :param driver:
-    :param xframe:
-    :param xrun_state:
-    :param running_state_text:
-    :return:
-    """
-    switch_frame(driver, xframe)
-    run_state = driver.find_element(By.XPATH, xrun_state).text
-    return run_state == running_state_text
-
 
 
 # class DaqWatcher:
