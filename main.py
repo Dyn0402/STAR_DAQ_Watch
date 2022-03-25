@@ -29,7 +29,9 @@ class DaqWatchGUI:
 
         Button(self.window, text='Start', command=self.start_click).grid(column=0, row=0, pady=10, padx=10)
         Button(self.window, text='Stop', command=self.stop_click).grid(column=1, row=0, pady=10, padx=10)
-        Button(self.window, text='Silence', command=self.silence_click).grid(column=0, row=1, pady=10, padx=10)
+        self.silence_button = Button(self.window, text='Silence', bg='blue', fg='white', command=self.silence_click)
+        self.silence_button.grid(column=0, row=1, pady=10, padx=10)
+        self.chimes_button = Button(self.window, text='Chimes On', bg='green', fg='white', command=self.chimes_click)
         self.silence_time_entry = Entry(self.window, width=5)
         self.silence_time_entry.grid(column=1, row=1, pady=10, padx=10)
 
@@ -67,6 +69,9 @@ class DaqWatchGUI:
     def silence_click(self):  # Need to indicate persistently on GUI whether silenced or not. Ideally button color.
         if self.watcher.silent:
             self.watcher.unsilence()
+            # sleep(0.1)
+            if not self.watcher.silent:
+                self.silence_button.configure(text='Silence', bg='blue', fg='white')
         else:
             entry = self.silence_time_entry.get()
             if entry != '':
@@ -75,10 +80,16 @@ class DaqWatchGUI:
                 except ValueError:
                     self.print_status('Bad entry for silence time. Need a float.')
             self.watcher.silence()
-            unsilence_thread = Thread(target=timer_func(self.watcher.unsilence, self.silence_time * 60))
-            unsilence_thread.start()  # not working. Google best way to set timer on tkinter
+            # sleep(0.1)
+            if self.watcher.silent:
+                self.silence_button.configure(text='Unsilence', bg='yellow', fg='black')
+            # unsilence_thread = Thread(target=timer_func(self.watcher.unsilence, self.silence_time * 60))
+            # unsilence_thread.start()  # not working. Google best way to set timer on tkinter
             # self.window.after(self.silence_time * 60 * 1000, self.watcher.unsilence)
         sleep(0.1)  # Don't let user click again till state switched
+
+    def chimes_click(self):
+        pass
 
     def print_status(self, status):
         if self.status_text is not None:
