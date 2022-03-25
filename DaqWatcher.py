@@ -52,9 +52,13 @@ class DaqWatcher:
         self.trig2_all_name = 'ALL'
         self.running_state_text = "RUNNING"
 
+        self.dt_format = '%a %H:%M:%S'
+
         self.driver = None
         self.alarm_times = set_alarm_times()
         self.xpaths = set_xpaths()
+
+        self.was_running = False
 
         self.alarm_playback = None
         self.live_det_stamps = {x: dt.now() for x in self.xpaths['detectors']}
@@ -121,12 +125,20 @@ class DaqWatcher:
         driver = self.driver  # Handoff
         self.driver = None  # Set immediately so is_alive is false
         # sleep(self.refresh_sleep + 3)
+        if self.alarm_playback is not None and self.alarm_playback.is_playing():
+            self.alarm_playback.stop()
         if driver is not None:
             self.print_status('Stopping, wait for confirmation...')
-            driver.close()  # Close open driver on own time.
+            driver.close()
+            driver.quit()
             self.print_status('Stopped.')
         else:
             self.print_status('No running driver to stop? Doing nothing.')
+
+    def restart(self):
+        self.print_status('Restarting WebDriver')
+        self.stop()
+        self.start()
 
     def silence(self):  # Not working at all?
         self.print_status('Trying to silence')
@@ -147,8 +159,13 @@ class DaqWatcher:
                              click_pause=0.3)
                 duration = read_field(self.driver, self.xpaths['frames']['header'], self.xpaths['info']['duration'])
                 running = self.check_running()
+                if self.was_running and not running:
+                    self.was_running = False
+                    break  # Restart driver after run
+                if running:
+                    self.was_running = True
                 if self.check_duration(duration) and running:
-                    self.print_status(f'\n{dt.now()} | Running. Check dead times')
+                    self.print_status(f'\n{dt.now().strftime(self.dt_format)} | Running. Check dead times')
                     try:
                         daq_hz = self.check_daq_hz()
                         dets_read = read_dets(self.driver, self.xpaths['frames']['main'], self.xpaths['detectors'])
@@ -192,7 +209,7 @@ class DaqWatcher:
                         self.live_det_stamps = {x: dt.now() for x in self.xpaths['detectors']}  # Reset dead time counters
                     else:
                         wait_reason = f'Not running for at least {self.min_run_time}s yet'
-                    self.print_status(f'{dt.now()} | {wait_reason}, waiting...')
+                    self.print_status(f'{dt.now().strftime(self.dt_format)} | {wait_reason}, waiting...')
                     if self.alarm_playback is not None and self.alarm_playback.is_playing():
                         self.alarm_playback.stop()
                 sleep(self.refresh_sleep)
@@ -200,6 +217,8 @@ class DaqWatcher:
                 self.print_status(f'Error reading Daq Monitor!\n{e}')
             # self.check_daq_async()  # Recursion to rerun check_daq asynchronously  # Let GUI handle threads
             # self.check_daq()  # Recursively check_daq until keep_checking is false -> Memory leak
+        if self.keep_checking_daq:
+            self.restart()
 
     def print_status(self, status):
         if self.gui is not None:
