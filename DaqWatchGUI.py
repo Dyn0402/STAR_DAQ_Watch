@@ -9,12 +9,13 @@ Created as STAR_DAQ_Watch/DaqWatchGUI.py
 """
 
 import tkinter as tk
-from tkinter import scrolledtext, Label, Button, Entry, LEFT
+from tkinter import scrolledtext, Label, Button, Entry, LEFT, Toplevel
 
 from time import sleep
 from threading import Thread
 
 from DaqWatcher import DaqWatcher
+from DaqWatchWindows import ParametersWindow, ReadmeWindow
 
 
 class DaqWatchGUI:
@@ -22,7 +23,7 @@ class DaqWatchGUI:
         self.window = None
         self.set_window()
 
-        self.status_text = scrolledtext.ScrolledText(self.window, wrap=tk.WORD, width=80, height=10)
+        self.status_text = scrolledtext.ScrolledText(self.window, wrap=tk.WORD, width=59, height=10)
         self.status_text.place(x=10, y=100)
 
         self.start_button = Button(self.window, text='Start', command=self.start_click)
@@ -34,15 +35,21 @@ class DaqWatchGUI:
         self.chimes_button = Button(self.window, text='Chimes Are On', bg='green', fg='white',
                                     command=self.chimes_click)
         self.chimes_button.place(x=80, y=50)
-        self.readme = Label(self.window, anchor='e', justify=LEFT,
-                            text='This program opens a firefox browser and watches the DAQ Monitor webpage.\n'
-                                 'Click "Start" to begin monitoring, "Stop" to end.\n'
-                                 'The "Silence" button will mute all sounds until "Unsilence" is clicked.\n'
-                                 'The "Chimes" button will toggle on/off the sound immediately indicating a '
-                                 'detector is dead.\n'
-                                 'The selenium webdriver this program runs on will be restarted after a run stops \n'
-                                 'to deal with the driver instance continuously accumulating memory usage.')
-        self.readme.place(x=205, y=0)
+        self.readme_button = Button(self.window, text='Readme')
+        self.readme_button.bind('<Button>', lambda e: ReadmeWindow(self.window))
+        self.readme_button.place(x=205, y=10)
+        self.parameters_button = Button(self.window, text='Set Parameters')
+        self.parameters_button.bind('<Button>', lambda e: ParametersWindow(self.window))
+        self.parameters_button.place(x=205, y=50)
+        # self.readme = Label(self.window, anchor='e', justify=LEFT,
+        #                     text='This program opens a firefox browser and watches the DAQ Monitor webpage.\n'
+        #                          'Click "Start" to begin monitoring, "Stop" to end.\n'
+        #                          'The "Silence" button will mute all sounds until "Unsilence" is clicked.\n'
+        #                          'The "Chimes" button will toggle on/off the sound immediately indicating a '
+        #                          'detector is dead.\n'
+        #                          'The selenium webdriver this program runs on will be restarted after a run stops \n'
+        #                          'to deal with the driver instance continuously accumulating memory usage.')
+        # self.readme.place(x=205, y=0)
         # self.silence_time_entry = Entry(self.window, width=5)
         # self.silence_time_entry.place(x=140, y=12)
 
@@ -59,7 +66,7 @@ class DaqWatchGUI:
     def set_window(self):
         self.window = tk.Tk()
         self.window.title('DAQ Watch')
-        self.window.geometry('700x300')
+        self.window.geometry('500x300')
 
     def start_click(self):
         if self.watcher.is_alive():

@@ -14,7 +14,8 @@ import PyInstaller.__main__
 PyInstaller.__main__.run([
     'main.py',
     '-y',
-    '-n daq_watch_v4',
+    '--noconsole',
+    '-n daq_watch_v5',
     '--add-data=Alarm04.wav;.',
     '--add-data=chimes.wav;.',
     '--add-data=chord.wav;.',
