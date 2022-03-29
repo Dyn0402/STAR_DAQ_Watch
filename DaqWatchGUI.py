@@ -35,31 +35,25 @@ class DaqWatchGUI:
         self.chimes_button = Button(self.window, text='Chimes Are On', bg='green', fg='white',
                                     command=self.chimes_click)
         self.chimes_button.place(x=80, y=50)
-        self.readme_button = Button(self.window, text='Readme')
-        self.readme_button.bind('<Button>', lambda e: ReadmeWindow(self.window))
+        self.readme_button = Button(self.window, text='Readme', command=self.readme_click)
+        # self.readme_button.bind('<Button>', lambda e: ReadmeWindow(self.window))
         self.readme_button.place(x=205, y=10)
-        self.parameters_button = Button(self.window, text='Set Parameters')
-        self.parameters_button.bind('<Button>', lambda e: ParametersWindow(self.window))
+        self.parameters_button = Button(self.window, text='Set Parameters', command=self.parameters_click)
+        # self.parameters_button.bind('<Button>', lambda e: ParametersWindow(self.window))
         self.parameters_button.place(x=205, y=50)
-        # self.readme = Label(self.window, anchor='e', justify=LEFT,
-        #                     text='This program opens a firefox browser and watches the DAQ Monitor webpage.\n'
-        #                          'Click "Start" to begin monitoring, "Stop" to end.\n'
-        #                          'The "Silence" button will mute all sounds until "Unsilence" is clicked.\n'
-        #                          'The "Chimes" button will toggle on/off the sound immediately indicating a '
-        #                          'detector is dead.\n'
-        #                          'The selenium webdriver this program runs on will be restarted after a run stops \n'
-        #                          'to deal with the driver instance continuously accumulating memory usage.')
-        # self.readme.place(x=205, y=0)
-        # self.silence_time_entry = Entry(self.window, width=5)
-        # self.silence_time_entry.place(x=140, y=12)
+
+        # self.test_button = Button(self.window, text='TEST', command=self.test_click)
+        # self.test_button.place(x=280, y=10)
 
         self.status_max_lines = 5000  # Number of lines at which to clear status text
         self.status_keep_lines = 500  # How many lines to keep when clearing status
 
-        self.silence_time = 0.1  # min  How long to silence
+        # self.silence_time = 0.1  # min  How long to silence
 
-        self.watcher = DaqWatcher()
-        self.watcher.gui = self
+        self.readme_window = None
+        self.parameters_window = None
+
+        self.watcher = DaqWatcher(self)
 
         self.window.mainloop()
 
@@ -116,6 +110,20 @@ class DaqWatchGUI:
             self.watcher.dead_chime = True
             self.chimes_button.configure(text='Chimes Are On', bg='green')
 
+    def readme_click(self):
+        if self.readme_window is not None and self.readme_window.winfo_exists():
+            self.readme_window.state('normal')
+            self.readme_window.focus_set()
+        else:
+            self.readme_window = ReadmeWindow(self.window)
+
+    def parameters_click(self):
+        if self.parameters_window is not None and self.parameters_window.winfo_exists():
+            self.parameters_window.state('normal')
+            self.parameters_window.focus_set()
+        else:
+            self.parameters_window = ParametersWindow(self.window, self, self.watcher)
+
     def print_status(self, status):
         if self.status_text is not None:
             go_to_end = self.status_text.yview()[-1] == 1.0
@@ -133,3 +141,8 @@ class DaqWatchGUI:
             text = '\n'.join(text.split('\n')[-self.status_keep_lines:])
             self.status_text.delete('1.0', tk.END)
             self.print_status(text)
+
+    def test_click(self):
+        if self.test_button is not None and self.watcher is not None:
+            test_thread = Thread(target=self.watcher.test)
+            test_thread.start()
