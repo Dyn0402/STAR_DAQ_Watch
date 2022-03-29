@@ -52,10 +52,10 @@ class DaqWatcher:
 
         # Audio objects, hard coded
         self.repeat_num = 1000  # To repeat notify sound for alarm, audio buffer fails if too large, 1000 still good
-        self.chimes = AudioSegment.from_file('chimes.wav')
-        self.notify = AudioSegment.from_file('notify.wav') * self.repeat_num
-        self.failure = AudioSegment.from_file('chord.wav') * 20
-        self.run_finished = AudioSegment.from_file('Alarm04.wav')
+        self.chimes = AudioSegment.from_file('audio_files/chimes.wav')
+        self.notify = AudioSegment.from_file('audio_files/notify.wav') * self.repeat_num
+        self.failure = AudioSegment.from_file('audio_files/chord.wav') * 20
+        self.run_finished = AudioSegment.from_file('audio_files/Alarm04.wav')
         self.alarm_playback = None
         self.run_timer_playback = None
 
@@ -66,6 +66,59 @@ class DaqWatcher:
         self.dt_format = '%a %H:%M:%S'
         self.xpaths = set_xpaths()
 
+    def get_driver_paths(self):
+        """
+        Figure out operating system and get paths to drivers.
+        :return:
+        """
+        if 'linux' in platform:
+            sys_post = '_linux'
+        elif platform == 'darwin':
+            sys_post = '_mac'
+        elif 'win' in platform:
+            sys_post = '_win'
+        else:
+            self.print_status('Unknown OS, don\'t know which selenium chrome driver to use. Exiting.')
+            return None
+
+        driver_paths = {
+            'Chrome':
+                {'driver_path': f'drivers/chromedriver{sys_post}', 'options': 'ChromeOptions', 'driver': 'Chrome'},
+            'Firefox':
+                {'driver_path': f'drivers/geckodriver{sys_post}', 'options': 'FirefoxOptions', 'driver': 'Firefox'},
+            'Edge':
+                {'driver_path': f'drivers/msedgedriver{sys_post}', 'options': 'EdgeOptions', 'driver': 'Edge'},
+        }
+
+        if sys_post == '_win':
+            driver_paths.update({
+                'Firefox_32': {'driver_path': f'drivers/geckodriver{sys_post}32',
+                               'options': 'FirefoxOptions', 'driver': 'Firefox'},
+                'Edge_32': {'driver_path': f'drivers/msedgedriver{sys_post}32',
+                            'options': 'EdgeOptions', 'driver': 'Edge'},
+            })
+
+        return driver_paths
+
+    def start_driver(self, driver_paths):
+        """
+        Get selenium driver in headless and silent mode. Try Chrome, Firefox, then Edge drivers in that order.
+        Take the first one that works
+        :param driver_paths: Dictionary of driver paths and corresponding methods for selenium
+        :return:
+        """
+        for browser_name, driver in driver_paths.items():
+            try:
+                op = getattr(webdriver, driver['options'])()
+                op.headless = True
+                op.add_argument('--log-level=3')
+                self.driver = getattr(webdriver, driver['driver'])(executable_path=driver['driver_path'], options=op)
+                self.print_status(f'Starting with {browser_name}')
+                return  # Take the first good driver and run with it.
+            except WebDriverException:
+                self.print_status(f'Couldn\'t find {browser_name} binaries (probably), trying another browser.')
+        self.print_status(f'Couldn\'t find any drivers that work, giving up.\n')
+
     def start(self, start_checking=True):
         """
         Start selenium with any browser that can be found in headless mode.
@@ -73,48 +126,18 @@ class DaqWatcher:
         :param start_checking: If True immediately start checking daq (default). Else just open driver and return
         :return:
         """
-        self.driver = 1  # Count trying to start as being alive.
+        self.keep_checking_daq = True
         self.print_status('Starting, please wait...')
-        firefox_driver_path = ''
-        if 'linux' in platform:
-            chrome_driver_path = './chromedriver_linux'
-        elif platform == 'darwin':
-            chrome_driver_path = './chromedriver_mac'
-        elif 'win' in platform:
-            chrome_driver_path = './chromedriver_win.exe'
-            firefox_driver_path = './geckodriver_win.exe'
-        else:
-            self.print_status('Unknown OS, don\'t know which selenium chrome driver to use. Exiting.')
-            return
-
-        try:
-            ser = Service(chrome_driver_path)
-            op = webdriver.ChromeOptions()
-            op.add_argument('headless')
-            op.add_argument('--log-level=3')
-            self.driver = webdriver.Chrome(service=ser, options=op)
-        except WebDriverException:
-            self.print_status(f'Couldn\'t find Chrome binaries (probably), try firefox.')
-            try:
-                ser = Service(firefox_driver_path)
-                op = webdriver.FirefoxOptions()
-                op.add_argument('--log-level=3')
-                op.headless = True
-                self.driver = webdriver.Firefox(service=ser, options=op)
-            except WebDriverException as e:
-                self.print_status(f'Chrome and firefox both failed, giving up.\n{e}')
+        self.start_driver(self.get_driver_paths())  # Figure out distribution then try all browsers to start self.driver
         self.driver.get('https://online.star.bnl.gov/daq/export/daq/')
-        sleep(3)  # Give some time for page to load
+        sleep(0.1)  # Give some time for page to load. Doesn't seem like this is needed but keep to avoid any annoyances
 
-        click_button(self.driver, self.xpaths['frames']['left'], self.xpaths['buttons']['refresh'], 8)
-        self.live_det_stamps = {x: dt.now() for x in self.alarm_times}
-        self.dead_det_times = {x: 0 for x in self.alarm_times}
-        if start_checking:
-            self.keep_checking_daq = True
-            self.check_daq()  # Check daq until keep_checking goes to false
-
-    def is_alive(self):
-        return self.driver is not None
+        if self.driver is not None and type(self.driver) != str:
+            click_button(self.driver, self.xpaths['frames']['left'], self.xpaths['buttons']['refresh'], 8)
+            self.live_det_stamps = {x: dt.now() for x in self.alarm_times}
+            self.dead_det_times = {x: 0 for x in self.alarm_times}
+            if start_checking:
+                self.check_daq()  # Check daq until keep_checking goes to false
 
     def stop(self):
         """
@@ -122,16 +145,15 @@ class DaqWatcher:
         :return:
         """
         self.keep_checking_daq = False
-        driver = self.driver  # Handoff
-        self.driver = None  # Set immediately so is_alive is false
-        # sleep(self.refresh_sleep + 3)
         if self.alarm_playback is not None and self.alarm_playback.is_playing():
             self.alarm_playback.stop()
-        if driver is not None:
+        if self.driver is not None:
             self.print_status('\nStopping, wait for confirmation...')
-            driver.close()
-            driver.quit()
-            self.print_status('Stopped.')
+            sleep(self.refresh_sleep + 2)  # Wait for current loop to finish. Could make smarter later if needed.
+            self.driver.close()
+            self.driver.quit()
+            self.driver = None
+            self.print_status('Stopped')
         else:
             self.print_status('\nNo running driver to stop? Doing nothing.')
 
@@ -139,6 +161,21 @@ class DaqWatcher:
         self.print_status('\nRestarting WebDriver')
         self.stop()
         self.start()
+
+    def is_alive(self):
+        """
+        Check if DaqWatcher is alive. keep_checking_daq state changes quickly while driver takes time to open/close.
+        Comparing the two can tell if in the process of stopping or starting.
+        :return:
+        """
+        if self.keep_checking_daq and self.driver is not None:
+            return True
+        elif self.keep_checking_daq and self.driver is None:
+            return 'starting'
+        elif self.driver is not None and not self.keep_checking_daq:
+            return 'stopping'
+        else:
+            return False
 
     def silence(self):
         if self.alarm_playback is not None and self.alarm_playback.is_playing():
@@ -151,6 +188,11 @@ class DaqWatcher:
         self.print_status('\nUnsilenced')
 
     def check_daq(self):
+        """
+        Check STAR DAQ Monitor page in a loop. If any detectors are dead or if trigger rate goes too low sound alarm.
+        Should try to clean this method up later.
+        :return:
+        """
         while self.keep_checking_daq:
             try:
                 click_button(self.driver, self.xpaths['frames']['left'], self.xpaths['buttons']['refresh'],
@@ -162,29 +204,21 @@ class DaqWatcher:
                     break  # Restart driver after run
                 if running:
                     self.was_running = True
+
                 if self.check_duration(duration) and running:
                     self.print_status(f'\n{dt.now().strftime(self.dt_format)} | Running. Check dead times')
                     try:
                         daq_hz = self.check_daq_hz()
-                        # dets_read = read_dets(self.driver, self.xpaths['frames']['main'], self.xpaths['detectors'])
                         dead_dets = self.check_dead_dets()
                     except selenium.common.exceptions.StaleElementReferenceException:
                         self.print_status('Something stale in detectors?')
                         continue
-                    # for det, dead in zip(self.xpaths['detectors'].keys(), dets_read):
-                    #     dead = int(dead.strip('%'))
-                    #     if dead > self.dead_thresh:
-                    #         if self.dead_det_times[det] == 0 and self.dead_chime and not self.silent:
-                    #             _play_with_simpleaudio(self.chimes)
-                    #         self.dead_det_times[det] = (dt.now() - self.live_det_stamps[det]).total_seconds()
-                    #     else:
-                    #         self.dead_det_times[det] = 0
-                    #         self.live_det_stamps[det] = dt.now()
                     unknown_dets = [det for det in dead_dets if det not in self.alarm_times]
                     for det in unknown_dets:
                         self.alarm_times.update({det: 0})  # If unknown detector, add to alarm times with 0s alarm
                         self.dead_det_times.update({det: 0})
                         self.live_det_stamps.update({det: dt.now()})
+
                     for det in self.alarm_times:
                         if det in dead_dets:
                             if self.dead_det_times[det] == 0 and self.dead_chime and not self.silent:
@@ -193,6 +227,7 @@ class DaqWatcher:
                         else:
                             self.dead_det_times[det] = 0
                             self.live_det_stamps[det] = dt.now()
+
                     alarm = False
                     any_dead = False
                     for det, dead_time in self.dead_det_times.items():
@@ -203,13 +238,16 @@ class DaqWatcher:
                             if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent:
                                 self.alarm_playback = _play_with_simpleaudio(self.notify)
                             alarm = True
+
                     if daq_hz < self.daq_hz_thresh and not any_dead:
-                        self.print_status(f'DAQ Hz less than {self.daq_hz_thresh}Hz but all detectors alive!')
+                        self.print_status(f'DAQ Hz less than {self.daq_hz_thresh} Hz but all detectors alive! '
+                                          f'Beam loss?')
                         if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent:
                             self.alarm_playback = _play_with_simpleaudio(self.notify)
                         alarm = True
                     elif not any_dead:
                         self.print_status(f'All detectors alive')
+
                     if not alarm:
                         if self.alarm_playback is not None and self.alarm_playback.is_playing():
                             self.alarm_playback.stop()
@@ -240,14 +278,12 @@ class DaqWatcher:
         :param duration: Duration string from DAQ Monitor field
         :return: True if running for longer than min_s, else False
         """
-
         duration = duration.split(',')
         if len(duration) == 4:
             duration = [int(x.strip().strip(y)) for x, y in zip(duration, [' days', ' hr', ' min', ' s'])]
-            duration = duration[0] * 24 * 60 * 60 + duration[1] * 60 * 60 + duration[2] * 60 + duration[
-                3]  # Convert to s
+            duration = duration[0] * 24 * 60 * 60 + duration[1] * 60 * 60 + duration[2] * 60 + duration[3]  # stamp to s
 
-            if self.run_duration_min * 60 < duration < self.run_dur_alarm_time:
+            if self.run_duration_min * 60 < duration < self.run_duration_min * 60 + self.run_dur_alarm_time:
                 self.print_status(f'Run duration {timedelta(seconds=duration)}, maybe time to start a new one?')
                 if self.run_timer_playback is None or not self.run_timer_playback.is_playing() and not self.silent:
                     self.run_timer_playback = _play_with_simpleaudio(self.run_finished)
@@ -267,6 +303,10 @@ class DaqWatcher:
         return run_state == self.running_state_text
 
     def check_daq_hz(self):
+        """
+        Find and return total DAQ rate. This corresponds to the last "All" column on the monitor page.
+        :return:
+        """
         switch_frame(self.driver, self.xpaths['frames']['main'])
         trig2_name = ''
         row = 2  # Row starts at 2 on page
@@ -303,6 +343,10 @@ class DaqWatcher:
         return dets_dead
 
     def write_config(self):
+        """
+        Write current DaqWatcher parameters to config file.
+        :return:
+        """
         self.print_status('Writing parameters to config file...')
         config = configparser.ConfigParser()
         config['General'] = {'run_start_buffer': str(self.min_run_time),
@@ -319,6 +363,10 @@ class DaqWatcher:
         self.print_status(f'Parameters written to {self.config_path}')
 
     def read_config(self):
+        """
+        Read parameters from config file and set them in current DaqWatcher instance
+        :return:
+        """
         self.print_status(f'Reading parameters from {self.config_path}...')
         config = configparser.ConfigParser()
         config.read(self.config_path)
@@ -373,11 +421,6 @@ class DaqWatcher:
             'stgc': 0,
             'fst': 0,
         }
-
-    # def test(self):
-    #     self.start(False)
-    #     self.read_dets()
-    #     self.stop()
 
 
 def set_xpaths():

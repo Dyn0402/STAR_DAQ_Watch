@@ -23,37 +23,35 @@ class DaqWatchGUI:
         self.window = None
         self.set_window()
 
-        self.status_text = scrolledtext.ScrolledText(self.window, wrap=tk.WORD, width=59, height=10)
+        self.status_text = scrolledtext.ScrolledText(self.window, wrap=tk.WORD, width=59, height=10, font=('ariel', 10))
         self.status_text.place(x=10, y=100)
 
-        self.start_button = Button(self.window, text='Start', command=self.start_click)
-        self.start_button.place(x=10, y=10)
-        self.stop_button = Button(self.window, text='Stop', bg='red', fg='white', command=self.stop_click)
-        self.stop_button.place(x=10, y=50)
-        self.silence_button = Button(self.window, text='Silence', bg='blue', fg='white', command=self.silence_click)
-        self.silence_button.place(x=80, y=10)
-        self.chimes_button = Button(self.window, text='Chimes Are On', bg='green', fg='white',
+        self.start_stop_button = Button(self.window, text='Start', font=('arial', 15), command=self.start_click)
+        self.start_stop_button.place(x=10, y=28)
+        self.silence_button = Button(self.window, text='Silence', font=('arial', 10), bg='blue', fg='white',
+                                     command=self.silence_click)
+        self.silence_button.place(x=120, y=10)
+        self.chimes_button = Button(self.window, text='Chimes Are On', font=('arial', 10), bg='green', fg='white',
                                     command=self.chimes_click)
-        self.chimes_button.place(x=80, y=50)
-        self.readme_button = Button(self.window, text='Readme', command=self.readme_click)
-        # self.readme_button.bind('<Button>', lambda e: ReadmeWindow(self.window))
-        self.readme_button.place(x=205, y=10)
-        self.parameters_button = Button(self.window, text='Set Parameters', command=self.parameters_click)
-        # self.parameters_button.bind('<Button>', lambda e: ParametersWindow(self.window))
-        self.parameters_button.place(x=205, y=50)
-
-        # self.test_button = Button(self.window, text='TEST', command=self.test_click)
-        # self.test_button.place(x=280, y=10)
+        self.chimes_button.place(x=120, y=50)
+        self.readme_button = Button(self.window, text='Readme', font=('arial', 10), command=self.readme_click)
+        self.readme_button.place(x=250, y=10)
+        self.parameters_button = Button(self.window, text='Set Parameters', font=('arial', 10),
+                                        command=self.parameters_click)
+        self.parameters_button.place(x=250, y=50)
 
         self.status_max_lines = 5000  # Number of lines at which to clear status text
         self.status_keep_lines = 500  # How many lines to keep when clearing status
-
-        # self.silence_time = 0.1  # min  How long to silence
+        self.click_sleep = 0.1  # s How long to sleep after a click to keep things safe
+        self.check_watcher_sleep = 0.1  # s How long to wait before updating GUI button colors
 
         self.readme_window = None
         self.parameters_window = None
 
         self.watcher = DaqWatcher(self)
+
+        self.check_watcher_thread = Thread(target=self.check_watcher_loop, daemon=True)
+        self.check_watcher_thread.start()
 
         self.window.mainloop()
 
@@ -62,45 +60,59 @@ class DaqWatchGUI:
         self.window.title('DAQ Watch')
         self.window.geometry('500x300')
 
+    def check_watcher_loop(self):
+        while self.window.winfo_exists():
+            self.check_watcher()
+            sleep(self.check_watcher_sleep)
+        self.check_watcher_thread.raise_exception()
+        self.check_watcher_thread.join()
+
+    def check_watcher(self):
+        watcher_live = self.watcher.is_alive()
+        if watcher_live == 'starting':
+            self.start_stop_button.configure(bg='yellow', fg='black', text='Starting', command=self.empty_click)
+        elif watcher_live == 'stopping':
+            self.start_stop_button.configure(bg='yellow', fg='black', text='Stopping', command=self.empty_click)
+        elif watcher_live:
+            self.start_stop_button.configure(bg='red', fg='white', text='Stop', command=self.stop_click)
+        else:
+            self.start_stop_button.configure(bg='green', fg='white', text='Start', command=self.start_click)
+
+        if self.watcher.silent:
+            self.silence_button.configure(text='Unsilence', bg='yellow', fg='black')
+        else:
+            self.silence_button.configure(text='Silence', bg='blue', fg='white')
+
+        if self.watcher.dead_chime:
+            self.chimes_button.configure(text='Chimes Are On', bg='green')
+        else:
+            self.chimes_button.configure(text='Chimes Are Off', bg='red')
+
     def start_click(self):
         if self.watcher.is_alive():
             self.print_status('Watcher instance already live!')
         else:
-            daq_watch_thread = Thread(target=self.watcher.start)
+            daq_watch_thread = Thread(target=self.watcher.start, daemon=True)
             daq_watch_thread.start()
-            self.stop_button.configure(bg='#F0F0F0', fg='black')
-            self.start_button.configure(bg='green', fg='white')
-            sleep(0.1)  # Don't let user click again before watcher.is_alive() has a chance to change state
+            self.check_watcher()
+            sleep(self.click_sleep)  # Don't let user click again before watcher.is_alive() has a chance to change state
 
     def stop_click(self):
         if self.watcher.is_alive():
-            stop_thread = Thread(target=self.watcher.stop)
+            stop_thread = Thread(target=self.watcher.stop, daemon=True)
             stop_thread.start()
-            self.stop_button.configure(bg='red', fg='white')
-            self.start_button.configure(bg='#F0F0F0', fg='black')
         else:
             self.print_status('No live watchers to stop!')
-        sleep(0.1)  # Don't let user click again before watcher.is_alive() has a chance to change state
+        self.check_watcher()
+        sleep(self.click_sleep)  # Don't let user click again before watcher.is_alive() has a chance to change state
 
     def silence_click(self):  # Need to indicate persistently on GUI whether silenced or not. Ideally button color.
         if self.watcher.silent:
             self.watcher.unsilence()
-            if not self.watcher.silent:
-                self.silence_button.configure(text='Silence', bg='blue', fg='white')
         else:
-            # entry = self.silence_time_entry.get()
-            # if entry != '':
-            #     try:
-            #         self.watcher.silence_duration = float(entry)
-            #     except ValueError:
-            #         self.print_status('Bad entry for silence time. Need a float.')
             self.watcher.silence()
-            if self.watcher.silent:
-                self.silence_button.configure(text='Unsilence', bg='yellow', fg='black')
-            # unsilence_thread = Thread(target=timer_func(self.watcher.unsilence, self.silence_time * 60))
-            # unsilence_thread.start()  # not working. Google best way to set timer on tkinter
-            # self.window.after(self.silence_time * 60 * 1000, self.watcher.unsilence)
-        sleep(0.1)  # Don't let user click again till state switched
+        self.check_watcher()
+        sleep(self.click_sleep)  # Don't let user click again till state switched
 
     def chimes_click(self):
         if self.watcher.dead_chime:
@@ -109,6 +121,7 @@ class DaqWatchGUI:
         else:
             self.watcher.dead_chime = True
             self.chimes_button.configure(text='Chimes Are On', bg='green')
+        sleep(self.click_sleep)  # Don't let user click again till state switched
 
     def readme_click(self):
         if self.readme_window is not None and self.readme_window.winfo_exists():
@@ -116,6 +129,7 @@ class DaqWatchGUI:
             self.readme_window.focus_set()
         else:
             self.readme_window = ReadmeWindow(self.window)
+        sleep(self.click_sleep)  # Don't let user click again till state switched
 
     def parameters_click(self):
         if self.parameters_window is not None and self.parameters_window.winfo_exists():
@@ -123,6 +137,10 @@ class DaqWatchGUI:
             self.parameters_window.focus_set()
         else:
             self.parameters_window = ParametersWindow(self.window, self, self.watcher)
+        sleep(self.click_sleep)  # Don't let user click again till state switched
+
+    def empty_click(self):
+        pass  # It seems like making command=None just reverts to last command. This is workaround.
 
     def print_status(self, status):
         if self.status_text is not None:

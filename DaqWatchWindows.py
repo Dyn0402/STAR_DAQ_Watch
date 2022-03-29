@@ -8,8 +8,7 @@ Created as STAR_DAQ_Watch/DaqWatchWindows.py
 @author: Dylan Neff, Dylan
 """
 
-import tkinter as tk
-from tkinter import scrolledtext, Label, Button, Entry, LEFT, RIGHT, BOTTOM, TOP, Toplevel
+from tkinter import Label, Button, Entry, LEFT, RIGHT, BOTTOM, TOP, Toplevel
 from tkinter.ttk import Notebook, Frame
 
 
@@ -17,16 +16,21 @@ class ReadmeWindow(Toplevel):
     def __init__(self, root_window):
         super().__init__(master=root_window)
         self.title('DAQ Watch Readme')
-        self.geometry('800x200')
-        self.readme = Label(self, anchor='e', justify=LEFT,
-                            text='This program opens a firefox browser and watches the DAQ Monitor webpage.\n'
+        self.window_width, self.window_height = 600, 250
+        self.geometry(f'{self.window_width}x{self.window_height}')
+        self.readme = Label(self, anchor='e', justify=LEFT, font=('ariel', 12), wraplength=self.window_width * 0.9,
+                            text='This program opens a browser and watches the DAQ Monitor webpage.\n'
                                  'Click "Start" to begin monitoring, "Stop" to end.\n'
                                  'The "Silence" button will mute all sounds until "Unsilence" is clicked.\n'
-                                 'The "Chimes" button will toggle on/off the sound immediately indicating a '
-                                 'detector is dead.\n'
-                                 'The selenium webdriver this program runs on will be restarted after a run stops \n'
-                                 'to deal with the driver instance continuously accumulating memory usage.')
-        self.readme.pack()
+                                 'The "Chimes" button will toggle on/off the sound that indicates a detector that '
+                                 'wasn\'t dead previously is now dead.\n'
+                                 'The Set Parameters button opens a window in which various parameters can be altered. '
+                                 'To make a change, set the desired parameter value in the text box and click the Set '
+                                 'button. This will reset all parameter values to those shown in the window.\n'
+                                 'The selenium webdriver this program runs on will be restarted after a run stops '
+                                 'to deal with the driver instance continuously accumulating memory usage.\n'
+                                 'Email Dylan Neff for issues: dneff@physics.ucla.edu')
+        self.readme.pack(side=LEFT)
 
 
 class ParametersWindow(Toplevel):
@@ -53,15 +57,6 @@ class ParametersWindow(Toplevel):
         self.tab_control.add(self.tab_alarm_times, text='Alarm Times')
         self.tab_control.pack(expand=1, fill='both')
 
-        # self.general_vars = {
-        #     'run_start_buffer': watcher.min_run_time,
-        #     'daq_hz_minimum': watcher.daq_hz_thresh,
-        #     'run_duration_target': watcher.run_duration_min,
-        #     'run_over_alarm_time': watcher.run_dur_alarm_time,
-        #     'loop_sleep': watcher.refresh_sleep,
-        #     'dead_threshold': watcher.dead_thresh,
-        # }
-
         self.general_vars = {
             'run_start_buffer': 'min_run_time',
             'daq_hz_minimum': 'daq_hz_thresh',
@@ -85,22 +80,23 @@ class ParametersWindow(Toplevel):
         self.alarm_time_info = 'Set alarm time for each detector. This is defined as the amount of time the detector ' \
                                'is dead before the alarm is sounded. All values in seconds.'
 
+        self.alarm_time_desc = {det: 's' for det in self.watcher.alarm_times}
+
         self.general_entries = self.create_par_tab(self.tab_general, self.general_vars, self.general_info,
                                                    self.general_descriptions)
 
         self.alarm_time_entries = self.create_par_tab(self.tab_alarm_times, self.watcher.alarm_times,
-                                                      self.alarm_time_info, immute=False)
+                                                      self.alarm_time_info, self.alarm_time_desc, immute=False)
 
     def create_par_tab(self, tab, parameter_vars, info_text='', descriptions=None, immute=True):
         Label(tab, text=info_text, wraplength=self.window_width * 0.9, justify=LEFT).place(x=0, y=0)
         entries = {name: None for name in parameter_vars}
-        pady, x_name, x_entry, x_desc = 35, 0, 130, 200
+        pady, x_name, x_entry, x_desc = 35, 0, 130, 180
         y = 50
         for name, variable in parameter_vars.items():
             Label(tab, text=f'{name}:', width=17, anchor='e').place(x=x_name, y=y)
-            entries[name] = Entry(tab, width=10)
+            entries[name] = Entry(tab, width=7)
             entries[name].place(x=x_entry, y=y+2)
-            var_val = None
             if immute:  # Looking at immutables, need to check from watcher
                 var_val = getattr(self.watcher, variable)
             else:  # Looking at a mutable object, can read directly
