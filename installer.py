@@ -27,7 +27,10 @@ def main():
         # '--add-data=geckodriver_win32.exe;.',
     ])
 
-    shutil.rmtree(f'./dist/{version_name}')
+    try:
+        shutil.rmtree(f'./dist/{version_name}')
+    except FileNotFoundError:
+        pass
     shutil.move(f'./dist/ {version_name}', f'./dist/{version_name}')  # Get rid of pyinstaller weird space
     shutil.copy('./watcher_config.ini', f'./dist/{version_name}/watcher_config.ini')
     shutil.copytree('./audio_files', f'./dist/{version_name}/audio_files')

@@ -53,6 +53,8 @@ class DaqWatchGUI:
         self.check_watcher_thread = Thread(target=self.check_watcher_loop, daemon=True)
         self.check_watcher_thread.start()
 
+        self.window.protocol('WM_DELETE_WINDOW', self.on_close)
+
         self.window.mainloop()
 
     def set_window(self):
@@ -160,7 +162,10 @@ class DaqWatchGUI:
             self.status_text.delete('1.0', tk.END)
             self.print_status(text)
 
-    def test_click(self):
-        if self.test_button is not None and self.watcher is not None:
-            test_thread = Thread(target=self.watcher.test)
-            test_thread.start()
+    def on_close(self):
+        self.window.destroy()
+        if self.watcher.is_alive():
+            stop_thread = Thread(target=self.watcher.stop, daemon=True)
+            stop_thread.start()
+        while self.watcher.is_alive():  # Keep main thread alive long enough for daemonic stop threads to kill driver
+            sleep(0.1)

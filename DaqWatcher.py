@@ -139,7 +139,7 @@ class DaqWatcher:
             if start_checking:
                 self.check_daq()  # Check daq until keep_checking goes to false
 
-    def stop(self):
+    def stop(self, silent=False):
         """
         Stop checking daq and then stop selenium driver.
         :return:
@@ -148,14 +148,18 @@ class DaqWatcher:
         if self.alarm_playback is not None and self.alarm_playback.is_playing():
             self.alarm_playback.stop()
         if self.driver is not None:
-            self.print_status('\nStopping, wait for confirmation...')
+            if not silent:
+                self.print_status('\nStopping, wait for confirmation...')
             sleep(self.refresh_sleep + 2)  # Wait for current loop to finish. Could make smarter later if needed.
-            self.driver.close()
-            self.driver.quit()
-            self.driver = None
-            self.print_status('Stopped')
+            if self.driver is not None:
+                self.driver.close()
+                self.driver.quit()
+                self.driver = None
+            if not silent:
+                self.print_status('Stopped')
         else:
-            self.print_status('\nNo running driver to stop? Doing nothing.')
+            if not silent:
+                self.print_status('\nNo running driver to stop? Doing nothing.')
 
     def restart(self):
         self.print_status('\nRestarting WebDriver')
