@@ -11,6 +11,9 @@ Created as STAR_DAQ_Watch/DaqWatchGUI.py
 import tkinter as tk
 from tkinter import scrolledtext, Label, Button, Entry, LEFT, Toplevel
 
+from sys import platform
+import os
+import subprocess
 from time import sleep
 from threading import Thread
 
@@ -35,13 +38,16 @@ class DaqWatchGUI:
                                     command=self.chimes_click)
         self.chimes_button.place(x=120, y=50)
         self.readme_button = Button(self.window, text='Readme', font=('arial', 10), command=self.readme_click)
-        self.readme_button.place(x=250, y=10)
+        self.readme_button.place(x=400, y=10)
         self.parameters_button = Button(self.window, text='Set Parameters', font=('arial', 10),
                                         command=self.parameters_click)
         self.parameters_button.place(x=250, y=50)
+        self.trigger_screenshots_button = Button(self.window, text='Trigger Screenshots', font=('arial', 10),
+                                                 command=self.trigger_screenshots_click)
+        self.trigger_screenshots_button.place(x=225, y=10)
 
-        self.status_max_lines = 5000  # Number of lines at which to clear status text
-        self.status_keep_lines = 500  # How many lines to keep when clearing status
+        self.status_max_lines = 10000  # Number of lines at which to clear status text
+        self.status_keep_lines = 1000  # How many lines to keep when clearing status
         self.click_sleep = 0.1  # s How long to sleep after a click to keep things safe
         self.check_watcher_sleep = 0.1  # s How long to wait before updating GUI button colors
 
@@ -133,6 +139,18 @@ class DaqWatchGUI:
             self.readme_window = ReadmeWindow(self.window)
         sleep(self.click_sleep)  # Don't let user click again till state switched
 
+    def trigger_screenshots_click(self):
+        """
+        Open directory containing dead trigger screenshots
+        :return:
+        """
+        if platform == 'darwin':
+            subprocess.Popen(['open', '-R', os.path.abspath(self.watcher.screenshot_path)])
+        elif 'win' in platform:
+            os.startfile(os.path.abspath(self.watcher.screenshot_path))
+        else:
+            subprocess.Popen(['xdg-open', os.path.abspath(self.watcher.screenshot_path)])
+
     def parameters_click(self):
         if self.parameters_window is not None and self.parameters_window.winfo_exists():
             self.parameters_window.state('normal')
@@ -147,7 +165,7 @@ class DaqWatchGUI:
     def print_status(self, status):
         if self.status_text is not None:
             go_to_end = self.status_text.yview()[-1] == 1.0
-            self.status_text.insert(tk.INSERT, f'\n{status}')
+            self.status_text.insert(tk.END, f'\n{status}')
             if go_to_end:
                 self.status_text.see('end')
             self.window.update()
@@ -164,8 +182,10 @@ class DaqWatchGUI:
 
     def on_close(self):
         self.window.destroy()
+        self.window = None
+        self.status_text = None  # Make sure everybody knows root window is dead, don't try to write anything else
         if self.watcher.is_alive():
-            stop_thread = Thread(target=self.watcher.stop, daemon=True)
+            stop_thread = Thread(target=self.watcher.stop, daemon=True, args=(True,))
             stop_thread.start()
         while self.watcher.is_alive():  # Keep main thread alive long enough for daemonic stop threads to kill driver
             sleep(0.1)

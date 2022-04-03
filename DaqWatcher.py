@@ -8,6 +8,7 @@ Created as STAR_DAQ_Watch/DaqWatcher
 @author: Dylan Neff, Dyn04
 """
 
+import os
 from sys import platform
 from time import sleep
 from datetime import datetime as dt, timedelta
@@ -49,6 +50,7 @@ class DaqWatcher:
         self.live_det_stamps = {x: dt.now() for x in self.alarm_times}
         self.dead_det_times = {x: 0 for x in self.alarm_times}
         self.keep_checking_daq = False
+        self.trigger_shot_taken = False
 
         # Audio objects, hard coded
         self.repeat_num = 1000  # To repeat notify sound for alarm, audio buffer fails if too large, 1000 still good
@@ -64,6 +66,10 @@ class DaqWatcher:
         self.trig2_all_name = 'ALL'
         self.running_state_text = 'RUNNING'
         self.dt_format = '%a %H:%M:%S'
+        self.screenshot_window_size = (1920 * 1.1, 1080 * 1.1)  # A bit larger to get all info visible on Trigger screen
+        self.screenshot_path = './Trigger_Screenshots/'
+        self.screenshot_dt_format = '%m-%d-%y_%H-%M-%S'
+        self.screenshot_out_name = 'trigger_dead_'
         self.xpaths = set_xpaths()
 
     def get_driver_paths(self):
@@ -82,10 +88,10 @@ class DaqWatcher:
             return None
 
         driver_paths = {
-            'Chrome':
-                {'driver_path': f'drivers/chromedriver{sys_post}', 'options': 'ChromeOptions', 'driver': 'Chrome'},
             'Firefox':
                 {'driver_path': f'drivers/geckodriver{sys_post}', 'options': 'FirefoxOptions', 'driver': 'Firefox'},
+            'Chrome':
+                {'driver_path': f'drivers/chromedriver{sys_post}', 'options': 'ChromeOptions', 'driver': 'Chrome'},
             'Edge':
                 {'driver_path': f'drivers/msedgedriver{sys_post}', 'options': 'EdgeOptions', 'driver': 'Edge'},
         }
@@ -136,6 +142,8 @@ class DaqWatcher:
             click_button(self.driver, self.xpaths['frames']['left'], self.xpaths['buttons']['refresh'], 8)
             self.live_det_stamps = {x: dt.now() for x in self.alarm_times}
             self.dead_det_times = {x: 0 for x in self.alarm_times}
+            self.trigger_shot_taken = False
+            self.screenshot_trigger()  # TESTING
             if start_checking:
                 self.check_daq()  # Check daq until keep_checking goes to false
 
@@ -209,8 +217,13 @@ class DaqWatcher:
                 if running:
                     self.was_running = True
 
-                if self.check_duration(duration) and running:
-                    self.print_status(f'\n{dt.now().strftime(self.dt_format)} | Running. Check dead times')
+                run_long_engough = self.check_duration(duration)
+                if running:
+                    run_long_str = ''
+                    if not run_long_engough:
+                        run_long_str = f'. Silent till {self.min_run_time}s...'
+                    self.print_status(f'\n{dt.now().strftime(self.dt_format)} | Running. Check dead times'
+                                      f'{run_long_str}')
                     try:
                         daq_hz = self.check_daq_hz()
                         dead_dets = self.check_dead_dets()
@@ -225,7 +238,8 @@ class DaqWatcher:
 
                     for det in self.alarm_times:
                         if det in dead_dets:
-                            if self.dead_det_times[det] == 0 and self.dead_chime and not self.silent:
+                            if self.dead_det_times[det] == 0 and self.dead_chime and not self.silent and \
+                                    run_long_engough:
                                 _play_with_simpleaudio(self.chimes)
                             self.dead_det_times[det] = (dt.now() - self.live_det_stamps[det]).total_seconds()
                         else:
@@ -239,14 +253,20 @@ class DaqWatcher:
                             any_dead = True
                             self.print_status(f'{det} dead for more than {dead_time:.2f}s!')
                         if dead_time > self.alarm_times[det]:
-                            if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent:
+                            if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent \
+                                    and run_long_engough:
                                 self.alarm_playback = _play_with_simpleaudio(self.notify)
                             alarm = True
+                            if det == 'trigger' and not self.trigger_shot_taken and run_long_engough:
+                                self.screenshot_trigger()
+                        elif det == 'trigger':
+                            self.trigger_shot_taken = False  # Reset if trigger is not dead
 
                     if daq_hz < self.daq_hz_thresh and not any_dead:
                         self.print_status(f'DAQ Hz less than {self.daq_hz_thresh} Hz but all detectors alive! '
                                           f'Beam loss?')
-                        if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent:
+                        if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent \
+                                and run_long_engough:
                             self.alarm_playback = _play_with_simpleaudio(self.notify)
                         alarm = True
                     elif not any_dead:
@@ -259,8 +279,7 @@ class DaqWatcher:
                     if not running:
                         wait_reason = f'Not running'
                         self.live_det_stamps = {x: dt.now() for x in self.alarm_times}  # Reset dead time counters
-                    else:
-                        wait_reason = f'Not running for at least {self.min_run_time}s yet'
+                        self.trigger_shot_taken = False  # Reset if trigger screenshot
                     self.print_status(f'{dt.now().strftime(self.dt_format)} | {wait_reason}, waiting...')
                     if self.alarm_playback is not None and self.alarm_playback.is_playing():
                         self.alarm_playback.stop()
@@ -312,17 +331,16 @@ class DaqWatcher:
         :return:
         """
         switch_frame(self.driver, self.xpaths['frames']['main'])
-        trig2_name = ''
         row = 2  # Row starts at 2 on page
-        while trig2_name != self.trig2_all_name:
+        while True:
             try:
                 trig2_name = self.driver.find_element(By.XPATH, self.xpaths['text']['trig2_name'](row)).text
                 if trig2_name == self.trig2_all_name:
                     daq_hz = int(self.driver.find_element(By.XPATH, self.xpaths['text']['trig2_hz'](row)).text)
                     return daq_hz
+                row += 1
             except NoSuchElementException:
-                row = -1  # Flag that end of table has been reached, stop looking for more detectors
-            row += 1
+                break  # Couldn't find element, maybe at end of table. Stop looking for more detectors
         self.print_status('Daq Rate not found! Bypassing low Daq Rate alarm.')
 
         return self.daq_hz_thresh + 1
@@ -345,6 +363,48 @@ class DaqWatcher:
             except NoSuchElementException:
                 row = -1  # Flag that end of table has been reached, stop looking for more detectors
         return dets_dead
+
+    def screenshot_trigger(self):
+        """
+        If trigger dead for longer than it's alarm time, go to trigger page and take a screenshot before returning to
+        checking daq.
+        :return:
+        """
+        switch_frame(self.driver, self.xpaths['frames']['main'])
+        xpath = self.xpaths['buttons']['detector']
+        xpath_test = '//*[@id="tb1"]/tbody/tr[1]/td[1]'
+        det_num = 1
+        while True:
+            try:
+                if self.driver.find_element(By.XPATH, xpath(det_num)).text.lower() == 'trigger':
+                    button = self.driver.find_element(By.XPATH, xpath(det_num))
+                    button.click()  # Go to trigger page
+                    attempt = 0
+                    while attempt < 500:  # Give up after 500 tries
+                        try:
+                            self.driver.find_element(By.XPATH, xpath_test)
+                            break
+                        except NoSuchElementException:
+                            switch_frame(self.driver, self.xpaths['frames']['main'])
+                            sleep(0.01)  # Wait for page to load
+                            attempt += 1
+                    self.driver.set_window_size(*self.screenshot_window_size)
+                    # self.driver.execute_script('document.body.style.zoom="90%"')  # Just use window size
+                    os.makedirs(self.screenshot_path, exist_ok=True)
+                    dt_str = dt.strftime(dt.now(), self.screenshot_dt_format)
+                    shot_path = f'{self.screenshot_path}{self.screenshot_out_name}{dt_str}.png'
+                    self.driver.save_screenshot(shot_path)
+                    self.print_status(f'\nTrigger page screenshot saved to {os.path.abspath(shot_path)}\n')
+                    self.trigger_shot_taken = True  # Set so another shot not taken until trigger alive again
+                    break  # Exit loop once trigger found
+                else:
+                    det_num += 1
+            except NoSuchElementException:
+                break  # Detector could not be found, ran out of det_nums, exit loop
+        switch_frame(self.driver, self.xpaths['frames']['left'])
+        monitoring_button = self.driver.find_element(By.XPATH, self.xpaths['buttons']['monitoring'])
+        monitoring_button.click()  # Go back to main monitor page
+        sleep(0.1)
 
     def write_config(self):
         """
@@ -442,7 +502,11 @@ def set_xpaths():
                 'footer': '//*[@id="footer"]',
             },
         'buttons':
-            {'refresh': '//*[@id="reload"]'},
+            {
+                'refresh': '//*[@id="reload"]',
+                'detector': lambda det_num: f'//*[@id="det_{det_num}"]',
+                'monitoring': '//*[@id="0"]',
+             },
         'text':
             {
                 'duration': '//*[@id="duration"]',

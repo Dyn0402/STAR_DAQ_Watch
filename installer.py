@@ -13,7 +13,7 @@ import shutil
 
 
 def main():
-    version_name = 'daq_watch_v5'
+    version_name = 'daq_watch_v7'
     PyInstaller.__main__.run([
         'main.py',
         '-y',

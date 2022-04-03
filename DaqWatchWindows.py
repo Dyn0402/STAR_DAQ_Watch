@@ -16,20 +16,31 @@ class ReadmeWindow(Toplevel):
     def __init__(self, root_window):
         super().__init__(master=root_window)
         self.title('DAQ Watch Readme')
-        self.window_width, self.window_height = 600, 250
+        self.window_width, self.window_height = 800, 400
         self.geometry(f'{self.window_width}x{self.window_height}')
         self.readme = Label(self, anchor='e', justify=LEFT, font=('ariel', 12), wraplength=self.window_width * 0.9,
-                            text='This program opens a browser and watches the DAQ Monitor webpage.\n'
+                            text='This program opens a browser and watches the DAQ Monitor webpage. An alarm will '
+                                 'sound if any detector is dead longer than its set "alarm time". If the trigger '
+                                 'dies for longer than its alarm time, a screenshot of the trigger screen will be '
+                                 'saved. If all detectors are alive and the total daq rate drops below '
+                                 '"daq_hz_minimum" the alarm will sound (typically beam loss). A short chime will '
+                                 'sound whenever a detector is first found to be dead. A soft alarm will sound when '
+                                 'the run passes the "run_duration_target" as a reminder to start a new run.\n\n'
                                  'Click "Start" to begin monitoring, "Stop" to end.\n'
                                  'The "Silence" button will mute all sounds until "Unsilence" is clicked.\n'
-                                 'The "Chimes" button will toggle on/off the sound that indicates a detector that '
-                                 'wasn\'t dead previously is now dead.\n'
-                                 'The Set Parameters button opens a window in which various parameters can be altered. '
-                                 'To make a change, set the desired parameter value in the text box and click the Set '
-                                 'button. This will reset all parameter values to those shown in the window.\n'
+                                 'The "Chimes" button will toggle on/off a soft sound that plays immediately when a '
+                                 'detector goes from alive to dead. This is sound is brief and does not repeat, in '
+                                 'contrast to the continuous alarm that goes off once a detector is dead for longer '
+                                 'than its alarm time.\n'
+                                 'The "Set Parameters" button opens a window in which various parameters can be '
+                                 'altered. To make a change, set the desired parameter value in the text box and click '
+                                 'the "Set" button. This will set all parameters to the corresponding valuse shown in '
+                                 'the window. There is a tab for general parameters and another for the alarm times '
+                                 'for each detector\n'
+                                 '"Trigger Screenshots" button opens directory containing trigger screenshots.\n'
                                  'The selenium webdriver this program runs on will be restarted after a run stops '
-                                 'to deal with the driver instance continuously accumulating memory usage.\n'
-                                 'Email Dylan Neff for issues: dneff@physics.ucla.edu')
+                                 'to deal with the driver instance continuously accumulating memory usage.\n\n'
+                                 'Email Dylan Neff for any issues: dneff@physics.ucla.edu')
         self.readme.pack(side=LEFT)
 
 
