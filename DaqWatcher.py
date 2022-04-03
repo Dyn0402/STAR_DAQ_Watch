@@ -64,7 +64,7 @@ class DaqWatcher:
         # Hard coded constants
         self.run_start_text = 'Starting run #'
         self.trig2_all_name = 'ALL'
-        self.running_state_text = 'RUNNING'
+        self.running_state_text = ['RUNNING', 'PAUSED']
         self.dt_format = '%a %H:%M:%S'
         self.screenshot_window_size = (1920 * 1.1, 1080 * 1.1)  # A bit larger to get all info visible on Trigger screen
         self.screenshot_path = './Trigger_Screenshots/'
@@ -143,7 +143,6 @@ class DaqWatcher:
             self.live_det_stamps = {x: dt.now() for x in self.alarm_times}
             self.dead_det_times = {x: 0 for x in self.alarm_times}
             self.trigger_shot_taken = False
-            self.screenshot_trigger()  # TESTING
             if start_checking:
                 self.check_daq()  # Check daq until keep_checking goes to false
 
@@ -323,7 +322,7 @@ class DaqWatcher:
         """
         switch_frame(self.driver, self.xpaths['frames']['left'])
         run_state = self.driver.find_element(By.XPATH, self.xpaths['text']['run_state']).text
-        return run_state == self.running_state_text
+        return run_state in self.running_state_text
 
     def check_daq_hz(self):
         """

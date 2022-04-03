@@ -144,12 +144,16 @@ class DaqWatchGUI:
         Open directory containing dead trigger screenshots
         :return:
         """
-        if platform == 'darwin':
-            subprocess.Popen(['open', '-R', os.path.abspath(self.watcher.screenshot_path)])
-        elif 'win' in platform:
-            os.startfile(os.path.abspath(self.watcher.screenshot_path))
+        path = os.path.abspath(self.watcher.screenshot_path)
+        if not os.path.exists(path):
+            self.print_status(f'Trigger Screenshot path doesn\'t exist, maybe no screenshots yet?\n{path}')
         else:
-            subprocess.Popen(['xdg-open', os.path.abspath(self.watcher.screenshot_path)])
+            if platform == 'darwin':
+                subprocess.Popen(['open', '-R', os.path.abspath(self.watcher.screenshot_path)])
+            elif 'win' in platform:
+                os.startfile(os.path.abspath(self.watcher.screenshot_path))
+            else:
+                subprocess.Popen(['xdg-open', os.path.abspath(self.watcher.screenshot_path)])
 
     def parameters_click(self):
         if self.parameters_window is not None and self.parameters_window.winfo_exists():
