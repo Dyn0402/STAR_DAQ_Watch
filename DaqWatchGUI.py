@@ -146,7 +146,7 @@ class DaqWatchGUI:
         """
         path = os.path.abspath(self.watcher.screenshot_path)
         if not os.path.exists(path):
-            self.print_status(f'Trigger Screenshot path doesn\'t exist, maybe no screenshots yet?\n{path}')
+            self.print_status(f'\nTrigger Screenshot path doesn\'t exist, maybe no screenshots yet?\n{path}')
         else:
             if platform == 'darwin':
                 subprocess.Popen(['open', '-R', os.path.abspath(self.watcher.screenshot_path)])
@@ -169,7 +169,7 @@ class DaqWatchGUI:
     def print_status(self, status):
         if self.status_text is not None:
             go_to_end = self.status_text.yview()[-1] == 1.0
-            self.status_text.insert(tk.END, f'\n{status}')
+            self.status_text.insert(tk.END, f'{status}\n')
             if go_to_end:
                 self.status_text.see('end')
             self.window.update()

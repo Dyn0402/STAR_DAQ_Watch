@@ -8,7 +8,7 @@ Created as STAR_DAQ_Watch/DaqWatchWindows.py
 @author: Dylan Neff, Dylan
 """
 
-from tkinter import Label, Button, Entry, LEFT, RIGHT, BOTTOM, TOP, Toplevel
+from tkinter import Label, Button, Entry, LEFT, RIGHT, BOTTOM, TOP, END, Toplevel
 from tkinter.ttk import Notebook, Frame
 
 
@@ -75,6 +75,7 @@ class ParametersWindow(Toplevel):
             'run_over_alarm_time': 'run_dur_alarm_time',
             'loop_sleep': 'refresh_sleep',
             'dead_threshold': 'dead_thresh',
+            'trigger_screenshots': 'take_trigger_screenshots'
         }
 
         self.general_descriptions = {
@@ -85,9 +86,11 @@ class ParametersWindow(Toplevel):
             'run_over_alarm_time': '(s) How long to keep playing run stop reminder alarm',
             'loop_sleep': '(s) How long program sleeps after checking daq. Page only updates every ~2s.',
             'dead_threshold': '(%) Threshold above which to consider detectors dead. ',
+            'trigger_screenshots': '(bool) If 1, take screenshots of trigger page if trigger dies. If 0, do not.'
         }
 
-        self.general_info = 'Set general parameters dealing with thresholds and times'
+        self.general_info = 'Set general parameters dealing with thresholds and times.\nClick "Set" to set current ' \
+                            'values (for all tabs). "Reset to Defaults" returns all values to hardcoded default values.'
         self.alarm_time_info = 'Set alarm time for each detector. This is defined as the amount of time the detector ' \
                                'is dead before the alarm is sounded. All values in seconds.'
 
@@ -99,6 +102,9 @@ class ParametersWindow(Toplevel):
         self.alarm_time_entries = self.create_par_tab(self.tab_alarm_times, self.watcher.alarm_times,
                                                       self.alarm_time_info, self.alarm_time_desc, immute=False)
 
+        self.tabs = [{'vars': self.general_vars, 'entries': self.general_entries, 'immute': True},
+                     {'vars': self.watcher.alarm_times, 'entries': self.alarm_time_entries, 'immute': False}]
+
     def create_par_tab(self, tab, parameter_vars, info_text='', descriptions=None, immute=True):
         Label(tab, text=info_text, wraplength=self.window_width * 0.9, justify=LEFT).place(x=0, y=0)
         entries = {name: None for name in parameter_vars}
@@ -107,7 +113,7 @@ class ParametersWindow(Toplevel):
         for name, variable in parameter_vars.items():
             Label(tab, text=f'{name}:', width=17, anchor='e').place(x=x_name, y=y)
             entries[name] = Entry(tab, width=7)
-            entries[name].place(x=x_entry, y=y+2)
+            entries[name].place(x=x_entry, y=y + 2)
             if immute:  # Looking at immutables, need to check from watcher
                 var_val = getattr(self.watcher, variable)
             else:  # Looking at a mutable object, can read directly
@@ -117,15 +123,28 @@ class ParametersWindow(Toplevel):
                 Label(tab, text=descriptions[name]).place(x=x_desc, y=y)
             y += pady
 
-        Button(tab, text='Set', command=self.set_pars).place(x=x_desc+50, y=y + 5)
+        Button(tab, text='Set', command=self.set_pars).place(x=x_desc + 50, y=y + 5)
+        Button(tab, text='Reset to Defaults', command=self.reset_default).place(x=x_desc + 200, y=y + 5)
 
         return entries
 
-    def set_pars(self):
-        tabs = [{'vars': self.general_vars, 'entries': self.general_entries, 'immute': True},
-                {'vars': self.watcher.alarm_times, 'entries': self.alarm_time_entries, 'immute': False}]
+    def read_watcher_vals(self):
+        """
+        Read values from watcher and update them in the entry boxes
+        :return:
+        """
+        for tab in self.tabs:
+            for name, variable in tab['vars'].items():
+                if tab['immute']:  # Looking at immutables, need to check from watcher
+                    var_val = getattr(self.watcher, variable)
+                else:  # Looking at a mutable object, can read directly
+                    var_val = variable
+                tab['entries'][name].delete(0, END)
+                tab['entries'][name].insert(0, var_val)
+        self.watch_gui.print_status('Parameters updated in GUI')
 
-        for tab in tabs:
+    def set_pars(self):
+        for tab in self.tabs:
             for name in tab['vars']:  # All floats for now luckily
                 entry = tab['entries'][name].get()
                 if entry != '':
@@ -135,8 +154,20 @@ class ParametersWindow(Toplevel):
                         else:  # Can set from object directly
                             tab['vars'][name] = float(entry)  # Set the value in watcher
                     except ValueError:
-                        self.watch_gui(f'{name} set to {entry}, couldn\'t be converted to float. Ignoring.')
+                        self.watch_gui.print_status(f'\n{name} value "{entry}", couldn\'t be converted to float. '
+                                                    f'Ignoring.')
 
         self.watch_gui.print_status('\nParameters set')
+        self.read_watcher_vals()
 
         self.watcher.write_config()  # Have watcher write new values to config file to keep as default
+
+    def reset_default(self):
+        """
+        Reset all parameters to hardcoded default values
+        :return:
+        """
+        self.watcher.def_config()
+        self.watch_gui.print_status('\nParameters reset to defaults')
+        self.read_watcher_vals()
+        self.watcher.write_config()

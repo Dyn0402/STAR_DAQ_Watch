@@ -37,7 +37,8 @@ class DaqWatcher:
         self.run_dur_alarm_time = None  # s How long to play run end notification.
         self.refresh_sleep = None  # s How long to sleep at end of loop before refreshing page and checking again
         self.dead_thresh = None  # % Dead time above which to consider detector dead
-        self.alarm_times = None  # How long to wait for each detector before sounding alarm
+        self.take_trigger_screenshots = None  # If 1 take trigger screenshots, else do not
+        self.alarm_times = {}  # How long to wait for each detector before sounding alarm
 
         # Read config from file, setting all above parameters. Use defaults if file read fails
         self.config_path = 'watcher_config.ini'
@@ -64,12 +65,16 @@ class DaqWatcher:
         # Hard coded constants
         self.run_start_text = 'Starting run #'
         self.trig2_all_name = 'ALL'
-        self.running_state_text = ['RUNNING', 'PAUSED']
+        self.run_running_text = 'RUNNING'
+        self.run_paused_text = 'PAUSED'
+        self.running_state_text = [self.run_running_text]
         self.dt_format = '%a %H:%M:%S'
         self.screenshot_window_size = (1920 * 1.1, 1080 * 1.1)  # A bit larger to get all info visible on Trigger screen
         self.screenshot_path = './Trigger_Screenshots/'
         self.screenshot_dt_format = '%m-%d-%y_%H-%M-%S'
         self.screenshot_out_name = 'trigger_dead_'
+        self.ignore_class_name = ['gray']  # Det class names to ignore, corresponds to color.
+        # 'sca_red' is dead, 'running' green, 'gray' is not included, 'ready' for ready but not running
         self.xpaths = set_xpaths()
 
     def get_driver_paths(self):
@@ -133,7 +138,7 @@ class DaqWatcher:
         :return:
         """
         self.keep_checking_daq = True
-        self.print_status('Starting, please wait...')
+        self.print_status('\nStarting, please wait...')
         self.start_driver(self.get_driver_paths())  # Figure out distribution then try all browsers to start self.driver
         self.driver.get('https://online.star.bnl.gov/daq/export/daq/')
         sleep(0.1)  # Give some time for page to load. Doesn't seem like this is needed but keep to avoid any annoyances
@@ -227,7 +232,7 @@ class DaqWatcher:
                         daq_hz = self.check_daq_hz()
                         dead_dets = self.check_dead_dets()
                     except selenium.common.exceptions.StaleElementReferenceException:
-                        self.print_status('Something stale in detectors?')
+                        self.print_status('Stale element on page, trying again. This is normal.')
                         continue
                     unknown_dets = [det for det in dead_dets if det not in self.alarm_times]
                     for det in unknown_dets:
@@ -252,11 +257,12 @@ class DaqWatcher:
                             any_dead = True
                             self.print_status(f'{det} dead for more than {dead_time:.2f}s!')
                         if dead_time > self.alarm_times[det]:
-                            if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent \
-                                    and run_long_engough:
+                            if (self.alarm_playback is None or not self.alarm_playback.is_playing()) and \
+                                    not self.silent and run_long_engough:
                                 self.alarm_playback = _play_with_simpleaudio(self.notify)
                             alarm = True
-                            if det == 'trigger' and not self.trigger_shot_taken and run_long_engough:
+                            if det == 'trigger' and not self.trigger_shot_taken and run_long_engough and \
+                                    self.take_trigger_screenshots:
                                 self.screenshot_trigger()
                         elif det == 'trigger':
                             self.trigger_shot_taken = False  # Reset if trigger is not dead
@@ -264,22 +270,20 @@ class DaqWatcher:
                     if daq_hz < self.daq_hz_thresh and not any_dead:
                         self.print_status(f'DAQ Hz less than {self.daq_hz_thresh} Hz but all detectors alive! '
                                           f'Beam loss?')
-                        if self.alarm_playback is None or not self.alarm_playback.is_playing() and not self.silent \
+                        if (self.alarm_playback is None or not self.alarm_playback.is_playing()) and not self.silent \
                                 and run_long_engough:
                             self.alarm_playback = _play_with_simpleaudio(self.notify)
                         alarm = True
                     elif not any_dead:
                         self.print_status(f'All detectors alive')
 
-                    if not alarm:
+                    if not alarm or not run_long_engough or self.silent:
                         if self.alarm_playback is not None and self.alarm_playback.is_playing():
                             self.alarm_playback.stop()
-                else:
-                    if not running:
-                        wait_reason = f'Not running'
-                        self.live_det_stamps = {x: dt.now() for x in self.alarm_times}  # Reset dead time counters
-                        self.trigger_shot_taken = False  # Reset if trigger screenshot
-                    self.print_status(f'{dt.now().strftime(self.dt_format)} | {wait_reason}, waiting...')
+                else:  # Not running
+                    self.live_det_stamps = {x: dt.now() for x in self.alarm_times}  # Reset dead time counters
+                    self.trigger_shot_taken = False  # Reset if trigger screenshot
+                    self.print_status(f'{dt.now().strftime(self.dt_format)} | Not running, waiting...')
                     if self.alarm_playback is not None and self.alarm_playback.is_playing():
                         self.alarm_playback.stop()
                 sleep(self.refresh_sleep)
@@ -317,11 +321,16 @@ class DaqWatcher:
 
     def check_running(self):
         """
-        Check if run state is running
+        Check if run state is running. If paused play run_finished notification audio
         :return: True if running, else false
         """
         switch_frame(self.driver, self.xpaths['frames']['left'])
         run_state = self.driver.find_element(By.XPATH, self.xpaths['text']['run_state']).text
+        if run_state == self.run_paused_text:
+            if not self.silent:  # Trigger normally pauses at beginning of run, stop this alarm
+                self.print_status(f'Run paused, maybe requested number of events has been reached?')
+            if self.run_timer_playback is None or not self.run_timer_playback.is_playing() and not self.silent:
+                self.run_timer_playback = _play_with_simpleaudio(self.run_finished)
         return run_state in self.running_state_text
 
     def check_daq_hz(self):
@@ -355,9 +364,11 @@ class DaqWatcher:
         dets_dead = []
         while row >= 0:
             try:
-                dead_percent = int(self.driver.find_element(By.XPATH, xpath(row, 3)).text.strip('%'))
-                if dead_percent > self.dead_thresh:
-                    dets_dead.append(self.driver.find_element(By.XPATH, xpath(row, 1)).text.lower())
+                ele = self.driver.find_element(By.XPATH, xpath(row, 3))
+                if ele.get_attribute('class') not in self.ignore_class_name:  # Ignore this detector, it's probably not included (gray)
+                    dead_percent = int(ele.text.strip('%'))
+                    if dead_percent > self.dead_thresh:
+                        dets_dead.append(self.driver.find_element(By.XPATH, xpath(row, 1)).text.lower())
                 row += 1
             except NoSuchElementException:
                 row = -1  # Flag that end of table has been reached, stop looking for more detectors
@@ -417,13 +428,14 @@ class DaqWatcher:
                              'run_duration_target': str(self.run_duration_min),
                              'run_over_alarm_time': str(self.run_dur_alarm_time),
                              'loop_sleep': str(self.refresh_sleep),
-                             'dead_threshold': str(self.dead_thresh)}
+                             'dead_threshold': str(self.dead_thresh),
+                             'trigger_screenshots': str(self.take_trigger_screenshots)}
 
         config['Detector Alarm Times'] = {det: str(alarm_time) for det, alarm_time in self.alarm_times.items()}
 
         with open(self.config_path, 'w') as configfile:
             config.write(configfile)
-        self.print_status(f'Parameters written to {self.config_path}')
+        self.print_status(f'Parameters written to {self.config_path}\n')
 
     def read_config(self):
         """
@@ -441,8 +453,11 @@ class DaqWatcher:
             self.run_dur_alarm_time = float(config['General']['run_over_alarm_time'])
             self.refresh_sleep = float(config['General']['loop_sleep'])
             self.dead_thresh = float(config['General']['dead_threshold'])
+            self.take_trigger_screenshots = float(config['General']['trigger_screenshots'])
 
-            self.alarm_times = {det: float(alarm_time) for det, alarm_time in config['Detector Alarm Times'].items()}
+            for det, alarm_time in config['Detector Alarm Times'].items():
+                self.alarm_times[det] = float(alarm_time)
+            # self.alarm_times = {det: float(alarm_time) for det, alarm_time in config['Detector Alarm Times'].items()}
 
         except KeyError:  # If any fields missing, just use defaults (could be smarter later if needed)
             use_default = True
@@ -459,31 +474,36 @@ class DaqWatcher:
         Use default parameter values
         :return:
         """
-        self.min_run_time = 60  # s If run not this old, don't check dead time yet
-        self.daq_hz_thresh = 1  # Hz If ALL DAQ Hz less than this, sound alarm (beam loss)
+        self.min_run_time = 60.0  # s If run not this old, don't check dead time yet
+        self.daq_hz_thresh = 1.0  # Hz If ALL DAQ Hz less than this, sound alarm (beam loss)
 
-        self.run_duration_min = 30  # min How long run should go for.
-        self.run_dur_alarm_time = 20  # s How long to play run end notification.
+        self.run_duration_min = 30.0  # min How long run should go for.
+        self.run_dur_alarm_time = 20.0  # s How long to play run end notification.
 
-        self.refresh_sleep = 1  # s How long to sleep at end of loop before refreshing page and checking again
-        self.dead_thresh = 90  # % Dead time above which to consider detector dead
+        self.refresh_sleep = 1.0  # s How long to sleep at end of loop before refreshing page and checking again
+        self.dead_thresh = 90.0  # % Dead time above which to consider detector dead
 
-        self.alarm_times = {
-            'tof': 30,
-            'btow': 0,
-            'trigger': 0,
-            'etow': 0,
-            'esmd': 0,
-            'tpx': 40,
-            'mtd': 30,
-            'gmt': 0,
-            'l4': 0,
-            'etof': 0,
-            'itpc': 40,
-            'fcs': 30,
-            'stgc': 0,
-            'fst': 0,
+        self.take_trigger_screenshots = 1  # If 1 take trigger screenshots, else do not
+
+        alarm_times = {
+            'tof': 30.0,
+            'btow': 0.0,
+            'trigger': 4.0,
+            'etow': 0.0,
+            'esmd': 0.0,
+            'tpx': 50.0,
+            'mtd': 30.0,
+            'gmt': 0.0,
+            'l4': 0.0,
+            'etof': 0.0,
+            'itpc': 50.0,
+            'fcs': 30.0,
+            'stgc': 0.0,
+            'fst': 0.0,
         }
+
+        for det, alarm_time in alarm_times.items():  # Keep the original dictionary for Parameter Window, just update
+            self.alarm_times[det] = alarm_time
 
 
 def set_xpaths():

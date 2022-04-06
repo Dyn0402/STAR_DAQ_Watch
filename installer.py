@@ -13,18 +13,12 @@ import shutil
 
 
 def main():
-    version_name = 'daq_watch_v7'
+    version_name = 'daq_watch_v8'
     PyInstaller.__main__.run([
         'main.py',
         '-y',
         '--noconsole',
         f'-n {version_name}',
-        # '--add-data=Alarm04.wav;.',
-        # '--add-data=chimes.wav;.',
-        # '--add-data=chord.wav;.',
-        # '--add-data=notify.wav;.',
-        # '--add-data=chromedriver_win.exe;.',
-        # '--add-data=geckodriver_win32.exe;.',
     ])
 
     try:
