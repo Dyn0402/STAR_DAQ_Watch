@@ -9,7 +9,7 @@ Created as STAR_DAQ_Watch/DaqWatcher
 """
 
 import os
-from sys import platform
+import logging
 from time import sleep
 from datetime import datetime as dt, timedelta
 import configparser
@@ -19,9 +19,20 @@ from selenium.common.exceptions import WebDriverException, NoSuchElementExceptio
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from webdriver_manager import chrome, firefox, microsoft
+from webdriver_manager.core.logger import set_logger
 
 from pydub import AudioSegment
 from pydub.playback import _play_with_simpleaudio
+
+
+# logging.getLogger('webdriver_manager').setLevel(logging.WARNING)
+
+# Disable logging from webdriver_manager
+logging.getLogger('WDM').setLevel(0)
+# logger = logging.getLogger("no_logging")
+# logger.setLevel(0)
+# set_logger(logger)
 
 
 class DaqWatcher:
@@ -79,35 +90,27 @@ class DaqWatcher:
 
     def get_driver_paths(self):
         """
-        Figure out operating system and get paths to drivers.
+        Download drivers with webdriver_manager and save paths along with driver options.
         :return:
         """
-        if 'linux' in platform:
-            sys_post = '_linux'
-        elif platform == 'darwin':
-            sys_post = '_mac'
-        elif 'win' in platform:
-            sys_post = '_win'
-        else:
-            self.print_status('Unknown OS, don\'t know which selenium chrome driver to use. Exiting.')
-            return None
+        # Attempts to suppress popup log window and geckodriver.log file, none successful.
+        os.environ['WDM_LOG'] = str(logging.NOTSET)  # Turn off webdriver_manager logs
+        os.environ['WDM_LOG_LEVEL'] = '0'  # Turn off webdriver_manager logs
+        os.environ['WDM_PROGRESS_BAR'] = str(0)  # Turn off webdriver_manager download progress bar
 
+        self.print_status(f'Downloading browser drivers...')
         driver_paths = {
             'Firefox':
-                {'driver_path': f'drivers/geckodriver{sys_post}', 'options': 'FirefoxOptions', 'driver': 'Firefox'},
+                {'driver_path': firefox.GeckoDriverManager().install(),
+                 'options': 'FirefoxOptions', 'driver': 'Firefox'},
             'Chrome':
-                {'driver_path': f'drivers/chromedriver{sys_post}', 'options': 'ChromeOptions', 'driver': 'Chrome'},
+                {'driver_path': chrome.ChromeDriverManager().install(),
+                 'options': 'ChromeOptions', 'driver': 'Chrome'},
             'Edge':
-                {'driver_path': f'drivers/msedgedriver{sys_post}', 'options': 'EdgeOptions', 'driver': 'Edge'},
+                {'driver_path': microsoft.EdgeChromiumDriverManager().install(),
+                 'options': 'EdgeOptions', 'driver': 'Edge'},
         }
-
-        if sys_post == '_win':
-            driver_paths.update({
-                'Firefox_32': {'driver_path': f'drivers/geckodriver{sys_post}32',
-                               'options': 'FirefoxOptions', 'driver': 'Firefox'},
-                'Edge_32': {'driver_path': f'drivers/msedgedriver{sys_post}32',
-                            'options': 'EdgeOptions', 'driver': 'Edge'},
-            })
+        self.print_status(f'Downloaded browser drivers for {", ".join(driver_paths.keys())}')
 
         return driver_paths
 
@@ -226,7 +229,7 @@ class DaqWatcher:
                     run_long_str = ''
                     if not run_long_engough:
                         run_long_str = f'. Silent till {self.min_run_time}s...'
-                    self.print_status(f'\n{dt.now().strftime(self.dt_format)} | Running. Check dead times'
+                    self.print_status(f'\n{dt.now().strftime(self.dt_format)} | Running. Checking dead times...'
                                       f'{run_long_str}')
                     try:
                         daq_hz = self.check_daq_hz()

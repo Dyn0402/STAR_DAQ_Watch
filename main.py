@@ -5,7 +5,7 @@ Created on March 21 2:22 AM 2022
 Created in PyCharm
 Created as STAR_DAQ_Watch/main
 
-Dependencies: Selenium 4.1.3, simpleaudio 1.0.4, pydub 0.25.1, time, datetime, sys.platform
+Dependencies: Selenium 4.9.1, simpleaudio 1.0.4, pydub 0.25.1
 libasound2-dev on linux
 
 Script to monitor STAR online DAQ Monitor webpage using selenium package. In an infinite loop, page is refreshed and
@@ -15,7 +15,7 @@ longer period of time as defined in set_alarm_times, a louder and persistent ala
 until no detectors are found to be dead.
 Selenium webdrivers will accumulate memory until closed. Now restart webdriver after each run to fix this issue.
 
-@author: Dylan Neff, Dyn04
+@author: Dylan Neff
 """
 
 from DaqWatchGUI import DaqWatchGUI

@@ -10,10 +10,12 @@ Created as STAR_DAQ_Watch/installer.py
 
 import PyInstaller.__main__
 import shutil
+import os
 
 
 def main():
-    version_name = 'daq_watch_v8'
+    # Using pyinstaller 5.11.0
+    version_name = 'daq_watch_v9'
     PyInstaller.__main__.run([
         'main.py',
         '-y',
@@ -26,9 +28,9 @@ def main():
     except FileNotFoundError:
         pass
     shutil.move(f'./dist/ {version_name}', f'./dist/{version_name}')  # Get rid of pyinstaller weird space
-    shutil.copy('./watcher_config.ini', f'./dist/{version_name}/watcher_config.ini')
+    if os.path.exists('./watcher_config.ini'):
+        shutil.copy('./watcher_config.ini', f'./dist/{version_name}/watcher_config.ini')
     shutil.copytree('./audio_files', f'./dist/{version_name}/audio_files')
-    shutil.copytree('./drivers', f'./dist/{version_name}/drivers')
 
     print('donzo')
 
