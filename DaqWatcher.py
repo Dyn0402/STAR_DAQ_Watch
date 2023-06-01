@@ -9,6 +9,7 @@ Created as STAR_DAQ_Watch/DaqWatcher
 """
 
 import os
+from sys import platform
 import logging
 from time import sleep
 from datetime import datetime as dt, timedelta
@@ -17,22 +18,11 @@ import configparser
 import selenium.common.exceptions
 from selenium.common.exceptions import WebDriverException, NoSuchElementException
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from webdriver_manager import chrome, firefox, microsoft
-from webdriver_manager.core.logger import set_logger
 
 from pydub import AudioSegment
 from pydub.playback import _play_with_simpleaudio
-
-
-# logging.getLogger('webdriver_manager').setLevel(logging.WARNING)
-
-# Disable logging from webdriver_manager
-logging.getLogger('WDM').setLevel(0)
-# logger = logging.getLogger("no_logging")
-# logger.setLevel(0)
-# set_logger(logger)
 
 
 class DaqWatcher:
@@ -126,7 +116,12 @@ class DaqWatcher:
                 op = getattr(webdriver, driver['options'])()
                 op.headless = True
                 op.add_argument('--log-level=3')
-                self.driver = getattr(webdriver, driver['driver'])(executable_path=driver['driver_path'], options=op)
+                self.print_status(f'{browser_name}, {op}')
+                if 'chrome' in browser_name.lower():
+                    op.add_experimental_option('excludeSwitches', ['enable-logging'])
+                self.driver = getattr(webdriver, driver['driver'])(executable_path=driver['driver_path'], options=op,
+                                                                   service_log_path='NUL' if 'win' in platform
+                                                                   else '/dev/null')
                 self.print_status(f'Starting with {browser_name}')
                 return  # Take the first good driver and run with it.
             except WebDriverException:

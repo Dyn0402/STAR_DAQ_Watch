@@ -20,7 +20,7 @@ def main():
         'main.py',
         '-y',
         '--noconsole',
-        f'-n {version_name}',
+        f'-n {version_name}'
     ])
 
     try:
