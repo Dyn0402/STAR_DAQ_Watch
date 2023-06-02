@@ -116,7 +116,6 @@ class DaqWatcher:
                 op = getattr(webdriver, driver['options'])()
                 op.headless = True
                 op.add_argument('--log-level=3')
-                self.print_status(f'{browser_name}, {op}')
                 if 'chrome' in browser_name.lower():
                     op.add_experimental_option('excludeSwitches', ['enable-logging'])
                 self.driver = getattr(webdriver, driver['driver'])(executable_path=driver['driver_path'], options=op,
