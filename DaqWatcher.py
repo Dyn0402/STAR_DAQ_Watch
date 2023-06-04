@@ -165,8 +165,8 @@ class DaqWatcher:
                     self.driver.close()
                     self.driver.quit()
                 except WebDriverException as e:
-                    print(f'Looks like closing the webdriver somehow failed?')
-                    print(e)
+                    self.print_status(f'Looks like closing the webdriver somehow failed?')
+                    self.print_status(e)
                 self.driver = None
             if not silent:
                 self.print_status('Stopped')
