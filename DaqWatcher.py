@@ -161,8 +161,12 @@ class DaqWatcher:
                 self.print_status('\nStopping, wait for confirmation...')
             sleep(self.refresh_sleep + 2)  # Wait for current loop to finish. Could make smarter later if needed.
             if self.driver is not None:
-                self.driver.close()
-                self.driver.quit()
+                try:
+                    self.driver.close()
+                    self.driver.quit()
+                except WebDriverException as e:
+                    print(f'Looks like closing the webdriver somehow failed?')
+                    print(e)
                 self.driver = None
             if not silent:
                 self.print_status('Stopped')
